@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/backend/">
+    <Project Path="backend/src/NetraScope.Core/NetraScope.Core.csproj" />
+    <Project Path="backend/src/NetraScope.Shared/NetraScope.Shared.csproj" />
+    <Project Path="backend/tests/NetraScope.Core.Tests/NetraScope.Core.Tests.csproj" />
+  </Folder>
+</Solution>

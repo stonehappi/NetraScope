@@ -1,0 +1,16 @@
+**/bin/
+**/obj/
+.DS_Store
+.vs/
+*.user
+.idea/
+agent/dist/
+backend/src/NetraScope.Core/wwwroot/downloads/
+*.db
+*.db-shm
+*.db-wal
+
+# Local environment files
+.env
+.env.local
+*.local
