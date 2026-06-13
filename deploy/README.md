@@ -27,6 +27,20 @@ One script per platform (Windows can't run `.sh`). Each does the same thing:
 .\deploy\deploy.ps1
 ```
 
+## Skipping the agent build
+
+If Go isn't installed, or the agent binaries don't need to be rebuilt,
+pass `--skip-agent` (`-SkipAgent` on Windows) to skip steps 2-3 and go
+straight to `docker compose up --build -d`:
+
+```sh
+./deploy/deploy.sh --skip-agent
+```
+
+```powershell
+.\deploy\deploy.ps1 -SkipAgent
+```
+
 ## Notes
 
 - Review `.env` before deploying to a real environment — the generated
