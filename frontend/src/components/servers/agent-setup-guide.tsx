@@ -36,13 +36,23 @@ function agentFileName(os: string, arch: string): string {
   return `netrascope-agent-${os}-${arch}${ext}`
 }
 
-function buildRunCommands(os: string, arch: string, serverUrl: string, token: string) {
+function buildRunCommands(
+  os: string,
+  arch: string,
+  serverUrl: string,
+  token: string,
+  downloadUrl: string,
+) {
   const fileName = agentFileName(os, arch)
 
   if (os === "windows") {
+    const setupLines = [`Invoke-WebRequest -Uri "${downloadUrl}" -OutFile "${fileName}"`]
     return {
-      run: [`.\\${fileName} \``, `  -server-url ${serverUrl} \``, `  -token ${token}`].join("\n"),
+      run: [...setupLines, `.\\${fileName} \``, `  -server-url ${serverUrl} \``, `  -token ${token}`].join(
+        "\n",
+      ),
       service: [
+        ...setupLines,
         "# Run PowerShell as Administrator",
         `.\\${fileName} \``,
         "  -service install `",
@@ -54,8 +64,12 @@ function buildRunCommands(os: string, arch: string, serverUrl: string, token: st
 
   const setupLines =
     os === "darwin"
-      ? [`chmod +x ./${fileName}`, `xattr -d com.apple.quarantine ./${fileName}`]
-      : [`chmod +x ./${fileName}`]
+      ? [
+          `curl -fsSL ${downloadUrl} -o ${fileName}`,
+          `chmod +x ./${fileName}`,
+          `xattr -d com.apple.quarantine ./${fileName}`,
+        ]
+      : [`curl -fsSL ${downloadUrl} -o ${fileName}`, `chmod +x ./${fileName}`]
 
   return {
     run: [...setupLines, `./${fileName} \\`, `  -server-url ${serverUrl} \\`, `  -token ${token}`].join(
@@ -94,10 +108,17 @@ export function AgentSetupGuide() {
     archTab && osDownloads.some((download) => download.arch === archTab)
       ? archTab
       : osDownloads[0]?.arch
+  const activeDownload = osDownloads.find((download) => download.arch === activeArch)
 
   const commands =
-    meQuery.data && activeTab && activeArch
-      ? buildRunCommands(activeTab, activeArch, `${API_BASE_URL}/api/metrics`, meQuery.data.ingestionToken)
+    meQuery.data && activeTab && activeArch && activeDownload
+      ? buildRunCommands(
+          activeTab,
+          activeArch,
+          `${API_BASE_URL}/api/metrics`,
+          meQuery.data.ingestionToken,
+          `${API_BASE_URL}${activeDownload.url}`,
+        )
       : null
 
   return (

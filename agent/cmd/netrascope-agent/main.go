@@ -184,10 +184,7 @@ func loadConfig() (config, string, error) {
 		return config{}, "", fmt.Errorf("read hostname: %w", err)
 	}
 
-	defaultBuffer, err := defaultBufferPath()
-	if err != nil {
-		return config{}, "", err
-	}
+	defaultBuffer := defaultBufferPath()
 
 	cfg := config{}
 	var serviceAction string
@@ -513,12 +510,14 @@ func sendPayload(ctx context.Context, client *http.Client, cfg config, payload [
 	return nil
 }
 
-func defaultBufferPath() (string, error) {
+func defaultBufferPath() string {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve cache directory: %w", err)
+		// $HOME/$XDG_CACHE_HOME are typically unset when running as a
+		// service under a dedicated account; fall back to a system path.
+		return defaultServiceBufferPath()
 	}
-	return filepath.Join(cacheDir, "NetraScope", "agent_buffer.db"), nil
+	return filepath.Join(cacheDir, "NetraScope", "agent_buffer.db")
 }
 
 func defaultServiceBufferPath() string {
