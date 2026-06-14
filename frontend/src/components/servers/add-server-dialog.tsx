@@ -20,7 +20,7 @@ export function AddServerDialog() {
           Add server
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className="max-h-[85vh] w-[80vw] overflow-y-auto sm:max-w-[80vw]">
         <DialogHeader>
           <DialogTitle>Connect a new server</DialogTitle>
           <DialogDescription>

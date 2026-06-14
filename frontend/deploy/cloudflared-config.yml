@@ -1,0 +1,18 @@
+# Cloudflare Tunnel config — exposes the local nginx (this server, port 80)
+# to the internet without opening any inbound firewall ports.
+#
+# Install:
+#   sudo cp frontend/deploy/cloudflared-config.yml /etc/cloudflared/config.yml
+#   (edit `tunnel:`, `credentials-file:`, and `hostname:` below first)
+#   sudo cloudflared service install
+#   sudo systemctl enable --now cloudflared
+#
+# See ../deploy/README.md for the full setup (cloudflared login, tunnel create, DNS route).
+
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_ID.json
+
+ingress:
+  - hostname: netrascope.example.com
+    service: http://localhost:80
+  - service: http_status:404

@@ -14,3 +14,9 @@ backend/src/NetraScope.Core/wwwroot/downloads/
 .env
 .env.local
 *.local
+.dev.vars
+.dev.vars.*
+
+# JavaScript dependencies and Worker output
+worker-backend/node_modules/
+worker-backend/.wrangler/

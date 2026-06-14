@@ -136,22 +136,28 @@ export function AgentSetupGuide() {
               ))}
             </TabsList>
           </Tabs>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {osDownloads.map((download) => (
               <Button
                 key={download.fileName}
                 variant={download.arch === activeArch ? "default" : "outline"}
                 size="sm"
-                asChild
                 onClick={() => setArchTab(download.arch)}
               >
-                <a href={`${API_BASE_URL}${download.url}`} download>
-                  <Download className="size-4" />
-                  {ARCH_LABELS[download.arch] ?? download.arch}
-                  <span className="text-muted-foreground">({formatBytes(download.sizeBytes)})</span>
-                </a>
+                {ARCH_LABELS[download.arch] ?? download.arch}
               </Button>
             ))}
+            {activeDownload && (
+              <Button size="sm" variant="secondary" asChild>
+                <a href={`${API_BASE_URL}${activeDownload.url}`} download>
+                  <Download className="size-4" />
+                  Download
+                  <span className="text-muted-foreground">
+                    ({formatBytes(activeDownload.sizeBytes)})
+                  </span>
+                </a>
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -169,6 +175,13 @@ export function AgentSetupGuide() {
             macOS blocks downloaded binaries by default ("cannot be verified"). The{" "}
             <code className="font-mono">xattr</code> command above clears the quarantine flag so
             it can run.
+          </p>
+        )}
+        {activeTab === "windows" && (
+          <p className="text-xs text-muted-foreground">
+            Run these commands in <strong>PowerShell</strong>, not Command Prompt (
+            <code className="font-mono">cmd</code>) — <code className="font-mono">cmd</code> does
+            not support this syntax.
           </p>
         )}
       </div>

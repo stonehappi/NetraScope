@@ -1,0 +1,26 @@
+{
+  "name": "netrascope-worker-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "deploy:d1": "wrangler deploy --config wrangler.d1.jsonc",
+    "dev": "wrangler dev",
+    "dev:d1": "wrangler dev --config wrangler.d1.jsonc",
+    "dry-run": "wrangler deploy --dry-run",
+    "dry-run:d1": "wrangler deploy --dry-run --config wrangler.d1.jsonc",
+    "migrate:d1:local": "wrangler d1 migrations apply netrascope --local --config wrangler.d1.jsonc",
+    "migrate:d1:remote": "wrangler d1 migrations apply netrascope --remote --config wrangler.d1.jsonc",
+    "types": "wrangler types --config wrangler.types.jsonc"
+  },
+  "dependencies": {
+    "hono": "^4.10.8"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typescript": "^6.0.2",
+    "wrangler": "^4.100.0"
+  }
+}

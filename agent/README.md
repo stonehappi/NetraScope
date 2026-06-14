@@ -36,6 +36,10 @@ by `GET /api/auth/me`). The backend always requires this token on
 and the servers reported with a given token only appear in that user's
 dashboard (see the backend README).
 
+For the Cloudflare Worker backend, use its public ingestion URL, for example
+`https://netrascope-api.example.workers.dev/api/metrics`. Setup and deployment
+instructions are in `worker-backend/README.md`.
+
 ## Install As A Background Service
 
 Installation requires administrator/root privileges. Installing always enables

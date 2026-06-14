@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "netrascope-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "STORAGE_BACKEND": "supabase",
+    "FRONTEND_ORIGIN": "http://localhost:5173",
+    "AGENT_DOWNLOAD_MANIFEST_URL": "",
+    "JWT_ISSUER": "NetraScope",
+    "JWT_AUDIENCE": "NetraScope",
+    "JWT_EXPIRY_MINUTES": "60"
+  },
+  "secrets": {
+    "required": [
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "JWT_SECRET"
+    ]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
