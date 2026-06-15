@@ -254,6 +254,8 @@ and mobile development, database design, system architecture, and applied
 research.
 
 - GitHub: [@stonehappi](https://github.com/stonehappi)
+- Email: [vannakseng1996@gmail.com](mailto:vannakseng1996@gmail.com)
+- Telegram: [@VannakStone](https://t.me/VannakStone)
 - LinkedIn: [Vannak Seng](https://www.linkedin.com/in/vannak-seng-072693109)
 - ORCID: [0009-0004-8130-8476](https://orcid.org/0009-0004-8130-8476)
 - Affiliation: Faculty of Engineering, Royal University of Phnom Penh
