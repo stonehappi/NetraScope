@@ -102,3 +102,19 @@ func TestNetworkReceiveRate(t *testing.T) {
 		t.Errorf("networkReceiveRate = %d, want %d", got, want)
 	}
 }
+
+func TestServiceDependenciesAreLinuxOnly(t *testing.T) {
+	t.Parallel()
+
+	if dependencies := serviceDependencies("windows"); len(dependencies) != 0 {
+		t.Fatalf("Windows dependencies = %v, want none", dependencies)
+	}
+	if dependencies := serviceDependencies("darwin"); len(dependencies) != 0 {
+		t.Fatalf("macOS dependencies = %v, want none", dependencies)
+	}
+
+	dependencies := serviceDependencies("linux")
+	if len(dependencies) != 2 {
+		t.Fatalf("Linux dependencies = %v, want systemd network dependencies", dependencies)
+	}
+}

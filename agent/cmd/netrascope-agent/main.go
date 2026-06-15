@@ -82,14 +82,11 @@ func main() {
 	}
 
 	serviceConfig := &service.Config{
-		Name:        "netrascope-agent",
-		DisplayName: "NetraScope Agent",
-		Description: "Collects host performance metrics for NetraScope.",
-		Arguments:   serviceArguments(cfg),
-		Dependencies: []string{
-			"After=network-online.target",
-			"Wants=network-online.target",
-		},
+		Name:         "netrascope-agent",
+		DisplayName:  "NetraScope Agent",
+		Description:  "Collects host performance metrics for NetraScope.",
+		Arguments:    serviceArguments(cfg),
+		Dependencies: serviceDependencies(runtime.GOOS),
 		Option: service.KeyValue{
 			"KeepAlive":              true,
 			"RunAtLoad":              true,
@@ -108,11 +105,13 @@ func main() {
 		log.Fatalf("initialize system service: %v", err)
 	}
 
-	serviceLogger, err := systemService.Logger(nil)
-	if err != nil {
-		log.Fatalf("initialize service logger: %v", err)
+	if !service.Interactive() {
+		serviceLogger, err := systemService.Logger(nil)
+		if err != nil {
+			log.Fatalf("initialize service logger: %v", err)
+		}
+		log.SetOutput(serviceLogWriter{logger: serviceLogger})
 	}
-	log.SetOutput(serviceLogWriter{logger: serviceLogger})
 
 	if serviceAction != "" {
 		if err := controlService(systemService, serviceAction); err != nil {
@@ -234,6 +233,16 @@ func serviceArguments(cfg config) []string {
 	return arguments
 }
 
+func serviceDependencies(goos string) []string {
+	if goos != "linux" {
+		return nil
+	}
+	return []string{
+		"After=network-online.target",
+		"Wants=network-online.target",
+	}
+}
+
 func controlService(systemService service.Service, action string) error {
 	switch action {
 	case "install":
@@ -283,14 +292,31 @@ func controlService(systemService service.Service, action string) error {
 
 func waitForServiceStatus(systemService service.Service, expected service.Status, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastStatus service.Status
+	var lastErr error
 	for time.Now().Before(deadline) {
 		status, err := systemService.Status()
+		lastStatus = status
+		lastErr = err
 		if err == nil && status == expected {
 			return nil
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return fmt.Errorf("service did not reach %s state within %s", serviceStatusName(expected), timeout)
+	if lastErr != nil {
+		return fmt.Errorf(
+			"service did not reach %s state within %s; last status check failed: %w",
+			serviceStatusName(expected),
+			timeout,
+			lastErr,
+		)
+	}
+	return fmt.Errorf(
+		"service did not reach %s state within %s; last status was %s",
+		serviceStatusName(expected),
+		timeout,
+		serviceStatusName(lastStatus),
+	)
 }
 
 func serviceStatusName(status service.Status) string {

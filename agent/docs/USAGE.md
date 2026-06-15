@@ -74,6 +74,14 @@ sudo ./netrascope-agent \
 Keep the executable at a permanent path before installing — the registered
 service points to that exact path.
 
+If installation fails, confirm the PowerShell or Command Prompt window says
+`Administrator` in its title. You can also remove a partial installation
+before retrying:
+
+```powershell
+.\netrascope-agent.exe -service uninstall
+```
+
 ## 4. Managing the service
 
 Once installed, use the same executable to control the service:
