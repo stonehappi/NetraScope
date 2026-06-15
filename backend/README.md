@@ -130,6 +130,19 @@ curl 'http://localhost:5050/api/servers?tag=production'
 
 Send an empty array to remove all tags from a server.
 
+## Delete a Server
+
+Authenticated users can permanently delete a server they own. This removes
+its metric history and tag assignments:
+
+```sh
+curl -X DELETE http://localhost:5050/api/servers/server-01 \
+  -H 'Authorization: Bearer YOUR_JWT'
+```
+
+Stop or uninstall the agent first. A running agent will recreate the server
+when it sends its next metric.
+
 ## Verify
 
 ```sh

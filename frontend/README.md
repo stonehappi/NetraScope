@@ -10,6 +10,7 @@ React, Vite, TypeScript, Tailwind CSS, and shadcn/ui.
 - Server detail page with CPU, memory, disk, and network usage cards plus
   history charts (15m / 1h / 6h / 24h).
 - Tag management (add/remove tags per server).
+- Owner-only server deletion with a destructive confirmation dialog.
 - Light, dark, and system theme support (defaults to your OS preference,
   toggle in the header).
 - Auto-refreshes every 15 seconds via React Query.

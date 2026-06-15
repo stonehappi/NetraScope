@@ -28,7 +28,7 @@ app.use("*", async (context, next) => {
   return cors({
     origin: origin === "*" ? "*" : origin.split(",").map((value) => value.trim()),
     allowHeaders: ["Authorization", "Content-Type"],
-    allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     maxAge: 86400,
   })(context, next)
 })
@@ -185,6 +185,16 @@ app.get("/api/servers", requireUser, async (context) => {
       tags: (server.server_tags ?? []).map((item) => item.TagName).sort(),
     })),
   )
+})
+
+app.delete("/api/servers/:serverId", requireUser, async (context) => {
+  const deleted = await createStorage(context.env).deleteServer(
+    context.req.param("serverId"),
+    context.get("user").id,
+  )
+  return deleted
+    ? context.body(null, 204)
+    : context.json({ title: "Not Found" }, 404)
 })
 
 app.get("/api/servers/:serverId/metrics", requireUser, async (context) => {

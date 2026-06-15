@@ -16,6 +16,7 @@ export interface Storage {
   ): Promise<boolean>
   listServers(ownerUserId: string, tag: string | null): Promise<ServerRow[]>
   ownsServer(serverId: string, ownerUserId: string): Promise<boolean>
+  deleteServer(serverId: string, ownerUserId: string): Promise<boolean>
   listMetrics(serverId: string, since: string): Promise<MetricRow[]>
   getServerWithTags(serverId: string, ownerUserId: string): Promise<ServerRow | null>
   replaceServerTags(

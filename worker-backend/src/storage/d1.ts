@@ -154,6 +154,14 @@ export class D1Storage implements Storage {
     return row?.Found === 1
   }
 
+  async deleteServer(serverId: string, ownerUserId: string): Promise<boolean> {
+    const result = await this.db
+      .prepare("DELETE FROM servers WHERE Id = ?1 AND OwnerUserId = ?2")
+      .bind(serverId, ownerUserId)
+      .run()
+    return result.meta.changes === 1
+  }
+
   async listMetrics(serverId: string, since: string): Promise<MetricRow[]> {
     const rows = await this.db
       .prepare(

@@ -1,9 +1,22 @@
 import { useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
-import { Link, useParams } from "react-router-dom"
-import { ArrowLeft } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link, useNavigate, useParams } from "react-router-dom"
+import { ArrowLeft, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -11,7 +24,7 @@ import { MetricChart } from "@/components/servers/metric-chart"
 import { StatusBadge } from "@/components/servers/status-badge"
 import { TagEditor } from "@/components/servers/tag-editor"
 import { UsageMeter } from "@/components/servers/usage-meter"
-import { getServerMetrics, getServers } from "@/lib/api"
+import { ApiError, deleteServer, getServerMetrics, getServers } from "@/lib/api"
 import { formatBytes, formatBytesPerSecond, formatChartTime, formatRelativeTime } from "@/lib/format"
 import type { MetricPoint } from "@/types/api"
 
@@ -26,6 +39,8 @@ const TIME_RANGES = [
 
 export function ServerDetailPage() {
   const { serverId = "" } = useParams<{ serverId: string }>()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [range, setRange] = useState("60")
 
   const serversQuery = useQuery({
@@ -42,6 +57,20 @@ export function ServerDetailPage() {
   const server = serversQuery.data?.find((item) => item.id === serverId)
   const points = metricsQuery.data ?? EMPTY_POINTS
   const latest = points.at(-1)
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteServer(serverId),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ["server-metrics", serverId] })
+      queryClient.removeQueries({ queryKey: ["server-tags", serverId] })
+      queryClient.invalidateQueries({ queryKey: ["servers"] })
+      toast.success("Server deleted.")
+      navigate("/dashboard", { replace: true })
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : "Failed to delete server.")
+    },
+  })
 
   const chartData = useMemo(
     () =>
@@ -84,7 +113,39 @@ export function ServerDetailPage() {
                 Last heartbeat {formatRelativeTime(server.lastHeartbeatAt)}
               </p>
             </div>
-            <StatusBadge lastHeartbeatAt={server.lastHeartbeatAt} />
+            <div className="flex items-center gap-2">
+              <StatusBadge lastHeartbeatAt={server.lastHeartbeatAt} />
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button type="button" variant="destructive" size="sm">
+                    <Trash2 className="size-4" />
+                    Delete
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete {server.hostName}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently deletes the server, its metric history, and its tag
+                      assignments. If its agent is still running, the server will appear again
+                      when the next metric is sent.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={deleteMutation.isPending}>
+                      Cancel
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => deleteMutation.mutate()}
+                    >
+                      {deleteMutation.isPending ? "Deleting…" : "Delete server"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm font-medium">Tags</p>

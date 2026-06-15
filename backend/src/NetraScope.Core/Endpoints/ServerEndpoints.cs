@@ -34,6 +34,12 @@ public static class ServerEndpoints
             .ProducesValidationProblem()
             .Produces(StatusCodes.Status404NotFound);
 
+        group.MapDelete("/{serverId}", DeleteServerAsync)
+            .WithName("DeleteServer")
+            .WithSummary("Deletes a server and its metric history")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound);
+
         return endpoints;
     }
 
@@ -155,6 +161,30 @@ public static class ServerEndpoints
         }
 
         return Results.Ok(new ServerTagsResponse(serverId, normalizedTags));
+    }
+
+    public static async Task<IResult> DeleteServerAsync(
+        string serverId,
+        ClaimsPrincipal user,
+        NetraDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUser.GetId(user);
+        var server = await db.Servers
+            .Include(item => item.Metrics)
+            .Include(item => item.ServerTags)
+            .SingleOrDefaultAsync(
+                item => item.Id == serverId && item.OwnerUserId == userId,
+                cancellationToken);
+
+        if (server is null)
+        {
+            return Results.NotFound();
+        }
+
+        db.Servers.Remove(server);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
     }
 
     private static Dictionary<string, string[]> ValidateAndNormalizeTags(

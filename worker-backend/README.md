@@ -137,6 +137,10 @@ export NETRASCOPE_TOKEN=TOKEN_FROM_THE_SETTINGS_PAGE
 Both storage backends expose the same API, so the frontend and agent do not
 need backend-specific changes.
 
+Authenticated users can delete servers they own with
+`DELETE /api/servers/{serverId}`. Deletion also removes metric history and tag
+assignments. Stop the agent first or its next metric will recreate the server.
+
 ## Storage choice
 
 D1 removes the external database request and Supabase credentials. It is a

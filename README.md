@@ -31,6 +31,7 @@ server details, or other sensitive information.
 - CPU, memory, disk, and inbound network monitoring.
 - Historical charts for 15-minute, 1-hour, 6-hour, and 24-hour windows.
 - Search, server tags, and tag-based filtering.
+- Owner-only server deletion with confirmation and metric-history cleanup.
 - Per-user dashboards protected by JWT authentication.
 - Per-user ingestion tokens for isolating agent data.
 - Cross-platform Go agent for Linux, Windows, and macOS.

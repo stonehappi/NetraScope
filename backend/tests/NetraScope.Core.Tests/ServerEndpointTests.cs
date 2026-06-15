@@ -134,6 +134,59 @@ public sealed class ServerEndpointTests
         Assert.Equal(StatusCodes.Status404NotFound, GetStatusCode(missingResult));
     }
 
+    [Fact]
+    public async Task DeleteServerRemovesOwnedServerMetricsAndTagAssignments()
+    {
+        await using var db = CreateDbContext();
+        AddServer(db, "server-05");
+        db.PerformanceMetrics.Add(new PerformanceMetric
+        {
+            ServerId = "server-05",
+            Timestamp = DateTimeOffset.UtcNow,
+            CpuUsagePct = 25,
+            MemoryUsedBytes = 512,
+            MemoryTotalBytes = 1024,
+            DiskUtilizationPct = 50,
+            NetworkInBytesSec = 100,
+        });
+        db.Tags.Add(new Tag { Name = "production" });
+        db.ServerTags.Add(new ServerTag
+        {
+            ServerId = "server-05",
+            TagName = "production",
+        });
+        await db.SaveChangesAsync();
+
+        var result = await ServerEndpoints.DeleteServerAsync(
+            "server-05",
+            TestAuth.CreatePrincipal(TestUserId),
+            db,
+            CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status204NoContent, GetStatusCode(result));
+        Assert.Empty(await db.Servers.ToArrayAsync());
+        Assert.Empty(await db.PerformanceMetrics.ToArrayAsync());
+        Assert.Empty(await db.ServerTags.ToArrayAsync());
+        Assert.Single(await db.Tags.ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task DeleteServerDoesNotDeleteAnotherUsersServer()
+    {
+        await using var db = CreateDbContext();
+        AddServer(db, "server-06", Guid.NewGuid());
+        await db.SaveChangesAsync();
+
+        var result = await ServerEndpoints.DeleteServerAsync(
+            "server-06",
+            TestAuth.CreatePrincipal(TestUserId),
+            db,
+            CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status404NotFound, GetStatusCode(result));
+        Assert.Single(await db.Servers.ToArrayAsync());
+    }
+
     private static int? GetStatusCode(IResult result) =>
         Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode;
 
@@ -149,14 +202,14 @@ public sealed class ServerEndpointTests
         return new NetraDbContext(options);
     }
 
-    private static void AddServer(NetraDbContext db, string serverId)
+    private static void AddServer(NetraDbContext db, string serverId, Guid? ownerUserId = null)
     {
         db.Servers.Add(new Server
         {
             Id = serverId,
             HostName = serverId,
             LastHeartbeatAt = DateTimeOffset.UtcNow,
-            OwnerUserId = TestUserId,
+            OwnerUserId = ownerUserId ?? TestUserId,
         });
     }
 }

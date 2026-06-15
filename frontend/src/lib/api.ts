@@ -74,6 +74,12 @@ export function getServerMetrics(serverId: string, minutes: number): Promise<Met
   )
 }
 
+export function deleteServer(serverId: string): Promise<void> {
+  return request<void>(`/api/servers/${encodeURIComponent(serverId)}`, {
+    method: "DELETE",
+  })
+}
+
 export function getServerTags(serverId: string): Promise<ServerTagsResponse> {
   return request<ServerTagsResponse>(`/api/servers/${encodeURIComponent(serverId)}/tags`)
 }

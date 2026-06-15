@@ -100,6 +100,18 @@ export class SupabaseStorage implements Storage {
     return rows.length > 0
   }
 
+  async deleteServer(serverId: string, ownerUserId: string): Promise<boolean> {
+    const rows = await supabaseRequest<Pick<ServerRow, "Id">[]>(
+      this.env,
+      `servers?select=Id&Id=${eq(serverId)}&OwnerUserId=${eq(ownerUserId)}`,
+      {
+        method: "DELETE",
+        headers: { Prefer: "return=representation" },
+      },
+    )
+    return rows.length === 1
+  }
+
   async listMetrics(serverId: string, since: string): Promise<MetricRow[]> {
     return supabaseRequest<MetricRow[]>(
       this.env,
