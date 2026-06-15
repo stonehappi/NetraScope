@@ -20,3 +20,4 @@ backend/src/NetraScope.Core/wwwroot/downloads/
 # JavaScript dependencies and Worker output
 worker-backend/node_modules/
 worker-backend/.wrangler/
+worker-backend/supabase/.temp/

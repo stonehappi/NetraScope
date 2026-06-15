@@ -14,7 +14,7 @@ import { BrandLogo } from "@/components/brand-logo"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useAuth } from "@/lib/auth-context"
+import { useAuth } from "@/lib/use-auth"
 import { cn } from "@/lib/utils"
 
 const features = [
@@ -140,11 +140,16 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="pb-24">
+        <section className="relative pb-24">
           <ScreenshotFrame
             src="/servers.png"
             alt="NetraScope server fleet dashboard showing live CPU, memory, and disk usage"
             className="mx-auto max-w-5xl"
+          />
+          <img
+            src="/server-card.png"
+            alt=""
+            className="pointer-events-none absolute -top-10 -right-4 hidden w-72 -rotate-3 drop-shadow-2xl sm:block xl:-right-10"
           />
         </section>
 
@@ -169,24 +174,23 @@ export function LandingPage() {
             />
           </div>
 
-          <div className="grid items-center gap-8 lg:grid-cols-2 lg:gap-12">
-            <ScreenshotFrame
-              src="/server-details-2.png"
-              alt="NetraScope history charts for CPU, memory, disk, and network usage"
-              className="lg:order-1"
-            />
-            <div className="space-y-4 lg:order-2">
-              <div className="inline-flex items-center gap-2 rounded-full border bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur">
-                <LineChart className="size-3.5 text-primary" />
-                History & alerts
-              </div>
-              <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                See trends, not just snapshots
-              </h2>
-              <p className="text-muted-foreground sm:text-lg">
-                Switch between 15-minute, 1-hour, 6-hour, and 24-hour windows to spot
-                trends over time, with thresholds that flag CPU or disk usage above 90%.
-              </p>
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur">
+              <LineChart className="size-3.5 text-primary" />
+              History & alerts
+            </div>
+            <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              See trends, not just snapshots
+            </h2>
+            <p className="max-w-2xl text-muted-foreground sm:text-lg">
+              Switch between 15-minute, 1-hour, 6-hour, and 24-hour windows to spot
+              trends over time, with thresholds that flag CPU or disk usage above 90%.
+            </p>
+            <div className="grid gap-4 pt-2 sm:grid-cols-2 lg:grid-cols-4">
+              <img src="/cpu-usage.png" alt="CPU usage history chart" className="w-full" loading="lazy" />
+              <img src="/memory-usage.png" alt="Memory usage history chart" className="w-full" loading="lazy" />
+              <img src="/disk-usage.png" alt="Disk usage history chart" className="w-full" loading="lazy" />
+              <img src="/network-usage.png" alt="Network throughput history chart" className="w-full" loading="lazy" />
             </div>
           </div>
         </section>

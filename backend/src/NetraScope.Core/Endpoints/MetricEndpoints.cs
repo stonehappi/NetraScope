@@ -23,6 +23,7 @@ public static class MetricEndpoints
             .AddEndpointFilter<IngestionTokenFilter>()
             .Produces(StatusCodes.Status202Accepted)
             .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status409Conflict)
             .ProducesValidationProblem();
 
         endpoints.MapGet("/api/servers/{serverId}/metrics", GetServerMetricsAsync)
@@ -90,9 +91,10 @@ public static class MetricEndpoints
             ? await db.Database.BeginTransactionAsync(cancellationToken)
             : null;
 
+        bool serverAccepted;
         if (isNpgsql)
         {
-            await db.Database.ExecuteSqlInterpolatedAsync(
+            var affectedRows = await db.Database.ExecuteSqlInterpolatedAsync(
                 $"""
                 INSERT INTO servers ("Id", "HostName", "IpAddress", "LastHeartbeatAt", "OwnerUserId")
                 VALUES ({packet.ServerId}, {packet.ServerId}, {ipAddress}, {receivedAt}, {ownerUserId})
@@ -101,18 +103,30 @@ public static class MetricEndpoints
                     "IpAddress" = EXCLUDED."IpAddress",
                     "LastHeartbeatAt" = EXCLUDED."LastHeartbeatAt",
                     "OwnerUserId" = EXCLUDED."OwnerUserId"
+                WHERE servers."OwnerUserId" IS NULL
+                   OR servers."OwnerUserId" = EXCLUDED."OwnerUserId"
                 """,
                 cancellationToken);
+            serverAccepted = affectedRows == 1;
         }
         else
         {
-            await UpsertServerForNonRelationalProviderAsync(
+            serverAccepted = await UpsertServerForNonRelationalProviderAsync(
                 db,
                 packet.ServerId,
                 ipAddress,
                 receivedAt,
                 ownerUserId,
                 cancellationToken);
+        }
+
+        if (!serverAccepted)
+        {
+            return Results.Conflict(new
+            {
+                title = "Server ID Conflict",
+                detail = "This server ID is already owned by another account.",
+            });
         }
 
         db.PerformanceMetrics.Add(new PerformanceMetric
@@ -192,7 +206,7 @@ public static class MetricEndpoints
     private static bool IsPercentage(float value) =>
         float.IsFinite(value) && value is >= 0 and <= 100;
 
-    private static async Task UpsertServerForNonRelationalProviderAsync(
+    private static async Task<bool> UpsertServerForNonRelationalProviderAsync(
         NetraDbContext db,
         string serverId,
         string? ipAddress,
@@ -211,12 +225,18 @@ public static class MetricEndpoints
                 LastHeartbeatAt = receivedAt,
                 OwnerUserId = ownerUserId,
             });
-            return;
+            return true;
+        }
+
+        if (server.OwnerUserId is not null && server.OwnerUserId != ownerUserId)
+        {
+            return false;
         }
 
         server.HostName = serverId;
         server.IpAddress = ipAddress;
         server.LastHeartbeatAt = receivedAt;
         server.OwnerUserId = ownerUserId;
+        return true;
     }
 }

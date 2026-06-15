@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ApiError } from "@/lib/api"
-import { useAuth } from "@/lib/auth-context"
+import { useAuth } from "@/lib/use-auth"
 
 export function RegisterPage() {
   const { register } = useAuth()

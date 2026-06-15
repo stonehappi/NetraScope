@@ -19,7 +19,7 @@
     {
       "binding": "DB",
       "database_name": "netrascope",
-      "database_id": "0e037ce7-7724-484e-9408-e29fd339cfcb",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
       "migrations_dir": "migrations"
     }
   ],

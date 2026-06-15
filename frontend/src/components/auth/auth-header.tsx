@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"
 import { BrandLogo } from "@/components/brand-logo"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Button } from "@/components/ui/button"
-import { useAuth } from "@/lib/auth-context"
+import { useAuth } from "@/lib/use-auth"
 
 export function AuthHeader() {
   const { isAuthenticated } = useAuth()

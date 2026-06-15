@@ -74,6 +74,30 @@ public sealed class MetricEndpointTests
     }
 
     [Fact]
+    public async Task PostMetricRejectsServerOwnedByAnotherUser()
+    {
+        await using var db = CreateDbContext();
+        var existingOwnerId = Guid.NewGuid();
+        db.Servers.Add(new Server
+        {
+            Id = "shared-server-id",
+            HostName = "shared-server-id",
+            LastHeartbeatAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            OwnerUserId = existingOwnerId,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await IngestAsync(
+            ValidPacket() with { ServerId = "shared-server-id" },
+            db,
+            ownerUserId: Guid.NewGuid());
+
+        Assert.Equal((int)HttpStatusCode.Conflict, GetStatusCode(result));
+        Assert.Empty(db.PerformanceMetrics);
+        Assert.Equal(existingOwnerId, (await db.Servers.SingleAsync()).OwnerUserId);
+    }
+
+    [Fact]
     public void GoAgentPayloadMatchesSharedContract()
     {
         const string payload =
@@ -156,10 +180,14 @@ public sealed class MetricEndpointTests
         NetworkInBytesSec = 2048,
     };
 
-    private static Task<IResult> IngestAsync(MetricPacket packet, NetraDbContext db)
+    private static Task<IResult> IngestAsync(
+        MetricPacket packet,
+        NetraDbContext db,
+        Guid? ownerUserId = null)
     {
         var httpContext = new DefaultHttpContext();
-        httpContext.Items[IngestionTokenFilter.OwnerUserIdKey] = TestOwnerUserId;
+        httpContext.Items[IngestionTokenFilter.OwnerUserIdKey] =
+            ownerUserId ?? TestOwnerUserId;
 
         return MetricEndpoints.IngestMetricAsync(
             packet,
