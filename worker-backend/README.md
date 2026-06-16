@@ -155,13 +155,6 @@ Server IDs are globally unique with both schemas. Give agents distinct
 `NETRASCOPE_SERVER_ID` values; ingestion returns `409 Conflict` instead of
 moving a server between accounts when an ID is already owned.
 
-## Agent Downloads
-
-Workers do not have a local filesystem. `/api/agent/downloads` returns an empty
-array unless `AGENT_DOWNLOAD_MANIFEST_URL` is configured. Host release binaries
-in R2, GitHub Releases, or another HTTPS origin and expose a JSON manifest with
-the existing `AgentDownload[]` shape.
-
 ## Existing Accounts
 
 If existing user rows are imported, login supports ASP.NET Identity V3

@@ -7,8 +7,14 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { API_BASE_URL, getAgentDownloads, getMe } from "@/lib/api"
-import { formatBytes } from "@/lib/format"
+import { API_BASE_URL, getMe } from "@/lib/api"
+
+interface AgentDownloadLink {
+  os: string
+  arch: string
+  fileName: string
+  url: string
+}
 
 const OS_LABELS: Record<string, string> = {
   linux: "Linux",
@@ -22,6 +28,19 @@ const ARCH_LABELS: Record<string, string> = {
 }
 
 const OS_ORDER = ["linux", "darwin", "windows"]
+const AGENT_DOWNLOAD_BASE_URL =
+  "https://github.com/stonehappi/NetraScope/raw/main/agent/dist"
+const AGENT_DOWNLOADS: AgentDownloadLink[] = OS_ORDER.flatMap((os) =>
+  ["amd64", "arm64"].map((arch) => {
+    const fileName = agentFileName(os, arch)
+    return {
+      os,
+      arch,
+      fileName,
+      url: `${AGENT_DOWNLOAD_BASE_URL}/${fileName}`,
+    }
+  }),
+)
 
 function detectOs(): string {
   const platform = navigator.userAgent
@@ -91,15 +110,10 @@ export function AgentSetupGuide() {
     queryFn: getMe,
   })
 
-  const downloadsQuery = useQuery({
-    queryKey: ["agent-downloads"],
-    queryFn: getAgentDownloads,
-  })
-
   const [tab, setTab] = useState<string | null>(null)
   const [archTab, setArchTab] = useState<string | null>(null)
 
-  const downloads = downloadsQuery.data ?? []
+  const downloads = AGENT_DOWNLOADS
   const availableOses = OS_ORDER.filter((os) => downloads.some((download) => download.os === os))
   const activeTab = tab ?? (availableOses.includes(detectOs()) ? detectOs() : availableOses[0])
 
@@ -117,15 +131,13 @@ export function AgentSetupGuide() {
           activeArch,
           `${API_BASE_URL}/api/metrics`,
           meQuery.data.ingestionToken,
-          `${API_BASE_URL}${activeDownload.url}`,
+          activeDownload.url,
         )
       : null
 
   return (
     <div className="space-y-4">
-      {downloadsQuery.isLoading && <Skeleton className="h-10 w-full max-w-md" />}
-
-      {!downloadsQuery.isLoading && availableOses.length > 0 && activeTab && (
+      {availableOses.length > 0 && activeTab && (
         <div className="space-y-2">
           <Tabs value={activeTab} onValueChange={setTab}>
             <TabsList>
@@ -149,12 +161,9 @@ export function AgentSetupGuide() {
             ))}
             {activeDownload && (
               <Button size="sm" variant="secondary" asChild>
-                <a href={`${API_BASE_URL}${activeDownload.url}`} download>
+                <a href={activeDownload.url} download>
                   <Download className="size-4" />
                   Download
-                  <span className="text-muted-foreground">
-                    ({formatBytes(activeDownload.sizeBytes)})
-                  </span>
                 </a>
               </Button>
             )}

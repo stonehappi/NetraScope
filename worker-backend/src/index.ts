@@ -13,7 +13,7 @@ import {
 } from "./security"
 import { createStorage, DuplicateUsernameError } from "./storage"
 import { SupabaseError } from "./supabase"
-import type { AgentDownload, MetricPacket, UserRow } from "./types"
+import type { MetricPacket, UserRow } from "./types"
 
 type Variables = {
   user: AuthenticatedUser
@@ -256,58 +256,6 @@ app.put("/api/servers/:serverId/tags", requireUser, async (context) => {
   return context.json({ serverId, tags: validation.tags })
 })
 
-app.get("/api/agent/downloads", async (context) => {
-  if (context.env.AGENT_BINARIES) {
-    const listing = await context.env.AGENT_BINARIES.list()
-    const downloads: AgentDownload[] = []
-    for (const object of listing.objects) {
-      const parsed = parseAgentFileName(object.key)
-      if (!parsed) {
-        continue
-      }
-      downloads.push({
-        os: parsed.os,
-        arch: parsed.arch,
-        fileName: object.key,
-        sizeBytes: object.size,
-        url: `/api/agent/download/${object.key}`,
-      })
-    }
-    return context.json(downloads)
-  }
-
-  if (!context.env.AGENT_DOWNLOAD_MANIFEST_URL) {
-    return context.json([])
-  }
-
-  const response = await fetch(context.env.AGENT_DOWNLOAD_MANIFEST_URL)
-  if (!response.ok) {
-    throw new HTTPException(502, { message: "Agent download manifest is unavailable." })
-  }
-  return context.json(await response.json())
-})
-
-app.get("/api/agent/download/:fileName", async (context) => {
-  const fileName = context.req.param("fileName")
-  if (!parseAgentFileName(fileName) || !context.env.AGENT_BINARIES) {
-    return context.json({ title: "Not Found" }, 404)
-  }
-
-  const object = await context.env.AGENT_BINARIES.get(fileName)
-  if (!object) {
-    return context.json({ title: "Not Found" }, 404)
-  }
-
-  return new Response(object.body, {
-    headers: {
-      "Content-Type": "application/octet-stream",
-      "Content-Length": object.size.toString(),
-      "Content-Disposition": `attachment; filename="${fileName}"`,
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
-  })
-})
-
 app.notFound((context) => context.json({ title: "Not Found" }, 404))
 
 app.onError((error, context) => {
@@ -423,16 +371,6 @@ function validateTags(
     return { errors: { Tags: [`A server can have at most ${maxTagsPerServer} tags.`] } }
   }
   return { tags }
-}
-
-const agentFileNamePattern = /^netrascope-agent-(linux|darwin|windows)-(amd64|arm64)(?:\.exe)?$/
-
-function parseAgentFileName(fileName: string): { os: string; arch: string } | null {
-  const match = agentFileNamePattern.exec(fileName)
-  if (!match) {
-    return null
-  }
-  return { os: match[1], arch: match[2] }
 }
 
 export default app

@@ -50,11 +50,3 @@ export interface MeResponse {
   username: string
   ingestionToken: string
 }
-
-export interface AgentDownload {
-  os: string
-  arch: string
-  fileName: string
-  sizeBytes: number
-  url: string
-}

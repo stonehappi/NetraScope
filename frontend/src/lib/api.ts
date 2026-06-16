@@ -1,5 +1,4 @@
 import type {
-  AgentDownload,
   AuthResponse,
   LoginRequest,
   MeResponse,
@@ -116,8 +115,4 @@ export function regenerateIngestionToken(): Promise<MeResponse> {
   return request<MeResponse>("/api/auth/token/regenerate", {
     method: "POST",
   })
-}
-
-export function getAgentDownloads(): Promise<AgentDownload[]> {
-  return request<AgentDownload[]>("/api/agent/downloads")
 }

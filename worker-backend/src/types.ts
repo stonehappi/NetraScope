@@ -36,11 +36,3 @@ export interface MetricRow {
   DiskUtilizationPct: number
   NetworkInBytesSec: number
 }
-
-export interface AgentDownload {
-  os: string
-  arch: string
-  fileName: string
-  sizeBytes: number
-  url: string
-}
