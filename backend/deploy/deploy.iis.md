@@ -49,18 +49,32 @@ The schema is created by EF Core migrations in step 5 — don't hand-create tabl
 
 ## 3. Publish the app
 
-From the repo root on your dev machine or a build agent:
+From the repo root on your dev machine or a build agent. Use whichever script
+matches the machine you're building on — both run `dotnet publish -c Release`
+and copy [`web.config`](web.config) into the output.
+
+### Windows (PowerShell)
 
 ```powershell
 .\backend\deploy\publish.ps1 -OutDir publish
 ```
 
-This runs `dotnet publish -c Release` and copies
-[`web.config`](web.config) into the output. Flags:
-
 - `-Runtime win-x64` (default) or `win-arm64` — match the server CPU.
 - `-SelfContained` — bundle the runtime (server then needs only the ANCM, not
   the full runtime). Omit for a smaller framework-dependent build.
+
+### macOS / Linux (bash)
+
+```sh
+./backend/deploy/publish.sh -o publish
+```
+
+- `-r win-x64` (default) or `win-arm64` — match the server CPU.
+- `-s` — self-contained (bundle the runtime; server then needs only the ANCM).
+  Omit for a smaller framework-dependent build.
+
+> The target runtime is always `win-*` regardless of the build machine — IIS
+> runs on Windows. Building on macOS/Linux still cross-publishes a Windows deploy.
 
 Copy the contents of `publish\` to the site's physical path, e.g.
 `C:\inetpub\netrascope\`.

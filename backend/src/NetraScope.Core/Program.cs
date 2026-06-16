@@ -64,25 +64,17 @@ builder.Services.AddRateLimiter(options =>
             }));
 });
 
-// CORS origins for the dashboard. Use a dedicated key — NOT "AllowedHosts",
-// which ASP.NET Core reserves for the Host Filtering middleware. Accepts a
-// comma-separated list, or "*" to allow any origin.
-const string FrontendCorsPolicy = "Frontend";
-var corsOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "")
-    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+// CORS for the dashboard: allow any origin.
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy(FrontendCorsPolicy, policy =>
-    {
-        if (corsOrigins is ["*"])
-        {
-            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
-        }
-        else if (corsOrigins.Length > 0)
-        {
-            policy.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod();
-        }
-    });
+    options.AddDefaultPolicy(
+                policy =>
+                    policy.WithOrigins("*")
+                        .AllowAnyMethod()
+                        .AllowAnyHeader()
+                        .SetIsOriginAllowedToAllowWildcardSubdomains()
+            );
 });
 
 var app = builder.Build();
@@ -92,7 +84,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseCors(FrontendCorsPolicy);
+app.UseCors();
 
 app.UseRateLimiter();
 
