@@ -90,7 +90,8 @@ Set them in the `<environmentVariables>` block of [`web.config`](web.config)
 | `ASPNETCORE_ENVIRONMENT` | yes | Must be `Production` (set in `web.config`). |
 | `ConnectionStrings__NetraScope` | yes | PostgreSQL connection string. |
 | `Auth__Jwt__Secret` | **yes** | Long random secret (32+ chars). **The app issues and validates session tokens with this — anyone who knows it can forge logins.** |
-| `AllowedHosts` | yes | Exact frontend origin for CORS, e.g. `https://netrascope.example.com` (scheme + host, no trailing slash). |
+| `Cors__AllowedOrigins` | yes | Frontend origin(s) for CORS, comma-separated, e.g. `https://netrascope.example.com` (scheme + host, no trailing slash). `*` allows any origin. |
+| `AllowedHosts` | no | ASP.NET Core **Host Filtering** — leave `*` (default) unless restricting to the API's own hostname (bare host, no scheme). **Do not put the frontend origin here** — a scheme-qualified value causes `400 Bad Request`. |
 | `Auth__Jwt__ExpiryMinutes` | no | Session lifetime, default `60`. |
 | `Auth__AllowRegistration` | no | `false` disables public sign-up (recommended for private deployments). Default `true`. |
 | `Auth__RateLimit__PermitLimit` | no | Login/register attempts allowed per IP per window. Default `10`. |
@@ -110,7 +111,8 @@ Example `web.config` block (edit the copied file in the publish output):
   <environmentVariable name="ConnectionStrings__NetraScope"
       value="Host=DB_HOST;Port=5432;Database=netrascope;Username=netrascope;Password=DB_PASSWORD" />
   <environmentVariable name="Auth__Jwt__Secret" value="REPLACE_WITH_A_LONG_RANDOM_SECRET" />
-  <environmentVariable name="AllowedHosts" value="https://netrascope.example.com" />
+  <environmentVariable name="Cors__AllowedOrigins" value="https://netrascope.example.com" />
+  <environmentVariable name="AllowedHosts" value="*" />
   <environmentVariable name="Auth__AllowRegistration" value="false" />
 </environmentVariables>
 ```
@@ -189,8 +191,15 @@ The API serves agent binaries from `wwwroot/downloads/` (proxied at
   not set, or `ASPNETCORE_ENVIRONMENT` isn't `Production`.
 - **DB refused/timeout** — `Test-NetConnection DB_HOST -Port 5432`; check
   `pg_hba.conf` allows the IIS server.
-- **CORS error in browser** — `AllowedHosts` must equal the frontend origin
-  exactly (scheme + host, no trailing slash).
+- **`400 Bad Request` on every request** — `AllowedHosts` is set to a
+  scheme-qualified value (e.g. an origin). Set it to `*` and put the frontend
+  origin in `Cors__AllowedOrigins` instead. (Can also be an IIS **site binding**
+  whose host name doesn't match the URL you're requesting — see below.)
+- **`Bad Request - Invalid Hostname` (IIS error page)** — the IIS site binding's
+  *Host name* doesn't match the URL. In IIS Manager → site → **Bindings**, either
+  clear the host name (listen on all) or set it to the hostname you browse to.
+- **CORS error in browser** — `Cors__AllowedOrigins` must equal the frontend
+  origin exactly (scheme + host, no trailing slash); comma-separate multiples.
 - **HTTP 429 on login** — rate limit hit; raise `Auth__RateLimit__PermitLimit`
   or wait out the window.
 
