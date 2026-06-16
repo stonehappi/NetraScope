@@ -10,6 +10,7 @@
     "JWT_ISSUER": "NetraScope",
     "JWT_AUDIENCE": "NetraScope",
     "JWT_EXPIRY_MINUTES": "60",
+    "ALLOW_REGISTRATION": "true",
   },
   "secrets": {
     "required": ["JWT_SECRET"]

@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using NetraScope.Core.Auth;
 using NetraScope.Core.Contracts;
@@ -21,6 +22,7 @@ public sealed class AuthEndpointTests
             new RegisterRequest("admin", "correct horse battery"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.Created, GetStatusCode(result));
@@ -41,12 +43,14 @@ public sealed class AuthEndpointTests
             new RegisterRequest("admin", "correct horse battery"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
 
         var result = await AuthEndpoints.RegisterAsync(
             new RegisterRequest("second", "correct horse battery"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.Created, GetStatusCode(result));
@@ -62,6 +66,7 @@ public sealed class AuthEndpointTests
             new RegisterRequest("admin", "short"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.BadRequest, GetStatusCode(result));
@@ -76,12 +81,14 @@ public sealed class AuthEndpointTests
             new RegisterRequest("admin", "correct horse battery"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
 
         var result = await AuthEndpoints.RegisterAsync(
             new RegisterRequest("admin", "another password"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.BadRequest, GetStatusCode(result));
@@ -96,6 +103,7 @@ public sealed class AuthEndpointTests
             new RegisterRequest("admin", "correct horse battery"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
 
         var result = await AuthEndpoints.LoginAsync(
@@ -118,6 +126,7 @@ public sealed class AuthEndpointTests
             new RegisterRequest("admin", "correct horse battery"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
 
         var result = await AuthEndpoints.LoginAsync(
@@ -137,6 +146,7 @@ public sealed class AuthEndpointTests
             new RegisterRequest("admin", "correct horse battery"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
         var user = await db.Users.SingleAsync();
 
@@ -159,6 +169,7 @@ public sealed class AuthEndpointTests
             new RegisterRequest("admin", "correct horse battery"),
             db,
             JwtOptionsAccessor(),
+            EmptyConfiguration(),
             CancellationToken.None);
         var user = await db.Users.SingleAsync();
         var originalToken = user.IngestionToken;
@@ -194,6 +205,9 @@ public sealed class AuthEndpointTests
     {
         Secret = "test-secret-test-secret-test-secret-test-secret",
     });
+
+    private static IConfiguration EmptyConfiguration() =>
+        new ConfigurationBuilder().Build();
 
     private static int? GetStatusCode(IResult result) =>
         Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode;

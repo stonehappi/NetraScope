@@ -18,6 +18,13 @@ public static class AuthEndpoints
     private const int MinPasswordLength = 8;
     private const int MaxUsernameLength = 100;
 
+    // A throwaway hash used to keep login timing constant when the username
+    // does not exist, so attackers cannot enumerate valid usernames by timing.
+    private static readonly string DummyPasswordHash =
+        new PasswordHasher<User>().HashPassword(
+            new User { Username = string.Empty, PasswordHash = string.Empty, IngestionToken = string.Empty },
+            "not-a-real-password");
+
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/auth").WithTags("Auth");
@@ -26,6 +33,7 @@ public static class AuthEndpoints
             .WithName("Register")
             .WithSummary("Creates a user account")
             .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.Auth)
             .Produces<AuthResponse>(StatusCodes.Status201Created)
             .ProducesValidationProblem();
 
@@ -33,6 +41,7 @@ public static class AuthEndpoints
             .WithName("Login")
             .WithSummary("Exchanges a username and password for a JWT")
             .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.Auth)
             .Produces<AuthResponse>()
             .Produces(StatusCodes.Status401Unauthorized);
 
@@ -55,8 +64,18 @@ public static class AuthEndpoints
         [FromBody] RegisterRequest request,
         NetraDbContext db,
         IOptions<JwtOptions> jwtOptions,
+        IConfiguration configuration,
         CancellationToken cancellationToken)
     {
+        // Registration is open by default but can be disabled on private
+        // deployments by setting Auth__AllowRegistration=false.
+        if (!configuration.GetValue("Auth:AllowRegistration", true))
+        {
+            return Results.Problem(
+                detail: "Account registration is disabled on this deployment.",
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
         var validationErrors = ValidateCredentials(request.Username, request.Password);
         if (validationErrors.Count > 0)
         {
@@ -104,12 +123,20 @@ public static class AuthEndpoints
             u => u.Username == normalizedUsername,
             cancellationToken);
 
+        var hasher = new PasswordHasher<User>();
+
+        // When the username does not exist we still perform a hash verification
+        // against a throwaway hash so the response time is indistinguishable
+        // from a wrong password, preventing username enumeration via timing.
         if (user is null)
         {
+            hasher.VerifyHashedPassword(
+                new User { Username = string.Empty, PasswordHash = string.Empty, IngestionToken = string.Empty },
+                DummyPasswordHash,
+                request.Password);
             return Results.Unauthorized();
         }
 
-        var hasher = new PasswordHasher<User>();
         var verification = hasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
         if (verification == PasswordVerificationResult.Failed)
         {

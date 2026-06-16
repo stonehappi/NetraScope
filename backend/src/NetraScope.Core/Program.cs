@@ -1,5 +1,7 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using NetraScope.Core.Auth;
@@ -44,15 +46,42 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
+// Throttle authentication attempts per client IP to slow credential brute
+// forcing and account-spam. Tune limits via Auth:RateLimit configuration.
+var authPermitLimit = builder.Configuration.GetValue("Auth:RateLimit:PermitLimit", 10);
+var authWindowSeconds = builder.Configuration.GetValue("Auth:RateLimit:WindowSeconds", 60);
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(RateLimitPolicies.Auth, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = authPermitLimit,
+                Window = TimeSpan.FromSeconds(authWindowSeconds),
+                QueueLimit = 0,
+            }));
+});
+
+// CORS origins for the dashboard. Use a dedicated key — NOT "AllowedHosts",
+// which ASP.NET Core reserves for the Host Filtering middleware. Accepts a
+// comma-separated list, or "*" to allow any origin.
 const string FrontendCorsPolicy = "Frontend";
-var allowedOrigins = builder.Configuration.GetSection("AllowedHosts").Get<string>() ?? "";
+var corsOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(FrontendCorsPolicy, policy =>
     {
-        policy.WithOrigins(allowedOrigins)
-                .AllowAnyHeader()
-                .AllowAnyMethod();
+        if (corsOrigins is ["*"])
+        {
+            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+        }
+        else if (corsOrigins.Length > 0)
+        {
+            policy.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod();
+        }
     });
 });
 
@@ -64,6 +93,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors(FrontendCorsPolicy);
+
+app.UseRateLimiter();
 
 app.UseStaticFiles(new StaticFileOptions
 {
