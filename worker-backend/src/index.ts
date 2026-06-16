@@ -50,6 +50,15 @@ const requireUser: MiddlewareHandler<{ Bindings: Env; Variables: Variables }> = 
 app.get("/health", (context) => context.json({ status: "ok" }))
 
 app.post("/api/auth/register", async (context) => {
+  // Registration is open by default but can be disabled on private
+  // deployments by setting ALLOW_REGISTRATION=false.
+  if (String(context.env.ALLOW_REGISTRATION ?? "true").toLowerCase() === "false") {
+    return context.json(
+      { title: "Account registration is disabled on this deployment." },
+      403,
+    )
+  }
+
   const body = await readJson<{ username?: string; password?: string }>(context)
   const errors = validateCredentials(body.username, body.password)
   if (Object.keys(errors).length > 0) {

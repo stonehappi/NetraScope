@@ -271,7 +271,12 @@ research.
 - [Agent release builds](agent/docs/BUILD.md)
 - [Docker deployment](deploy/README.md)
 - [Cloudflare Worker backend](worker-backend/README.md)
-- [IIS deployment](backend/deploy/README.md)
+
+### Production deployment guides
+
+- [Backend on IIS](backend/deploy/deploy.iis.md)
+- [Frontend with nginx](frontend/deploy/deploy.nginx.md)
+- [Worker backend on Cloudflare D1](worker-backend/deploy.d1.md)
 
 ## License
 

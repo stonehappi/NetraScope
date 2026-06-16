@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: netrascope
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
@@ -23,8 +23,8 @@ services:
       dockerfile: backend/Dockerfile
       target: migrations
     environment:
-      ConnectionStrings__NetraScope: Host=db;Port=5432;Database=netrascope;Username=postgres;Password=${POSTGRES_PASSWORD:-password}
-      Auth__Jwt__Secret: ${JWT_SECRET:-CHANGE_ME_DEV_ONLY_REPLACE_WITH_A_LONG_RANDOM_SECRET}
+      ConnectionStrings__NetraScope: Host=db;Port=5432;Database=netrascope;Username=postgres;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      Auth__Jwt__Secret: ${JWT_SECRET:?JWT_SECRET must be set in .env to a long random value}
     depends_on:
       db:
         condition: service_healthy
@@ -38,8 +38,8 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
-      ConnectionStrings__NetraScope: Host=db;Port=5432;Database=netrascope;Username=postgres;Password=${POSTGRES_PASSWORD:-password}
-      Auth__Jwt__Secret: ${JWT_SECRET:-CHANGE_ME_DEV_ONLY_REPLACE_WITH_A_LONG_RANDOM_SECRET}
+      ConnectionStrings__NetraScope: Host=db;Port=5432;Database=netrascope;Username=postgres;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      Auth__Jwt__Secret: ${JWT_SECRET:?JWT_SECRET must be set in .env to a long random value}
     depends_on:
       db:
         condition: service_healthy

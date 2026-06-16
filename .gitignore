@@ -7,6 +7,12 @@
 
 backend/src/NetraScope.Core/wwwroot/downloads/
 agent/dist/
+agent/netrascope-agent
+agent/netrascope-agent.exe
+
+# .NET publish output
+publish/
+**/publish/
 *.db
 *.db-shm
 *.db-wal
