@@ -6,6 +6,7 @@
 .idea/
 
 backend/src/NetraScope.Core/wwwroot/downloads/
+agent/dist/
 *.db
 *.db-shm
 *.db-wal

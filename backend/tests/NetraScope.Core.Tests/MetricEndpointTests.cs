@@ -56,6 +56,34 @@ public sealed class MetricEndpointTests
     }
 
     [Fact]
+    public async Task PostMetricAcceptsBatchPayload()
+    {
+        await using var db = CreateDbContext();
+        var first = ValidPacket() with
+        {
+            ServerId = "server-batch",
+            Timestamp = DateTimeOffset.UtcNow.AddSeconds(-10),
+            CpuUsagePct = 20,
+        };
+        var second = first with
+        {
+            Timestamp = DateTimeOffset.UtcNow,
+            CpuUsagePct = 35,
+        };
+
+        var result = await IngestAsync([first, second], db);
+
+        Assert.Equal((int)HttpStatusCode.Accepted, GetStatusCode(result));
+        Assert.Equal(1, await db.Servers.CountAsync(item => item.Id == first.ServerId));
+        var cpuValues = await db.PerformanceMetrics
+            .Where(item => item.ServerId == first.ServerId)
+            .OrderBy(item => item.Timestamp)
+            .Select(item => item.CpuUsagePct)
+            .ToArrayAsync();
+        Assert.Equal([20f, 35f], cpuValues);
+    }
+
+    [Fact]
     public async Task PostMetricRejectsInvalidValues()
     {
         await using var db = CreateDbContext();
@@ -68,6 +96,17 @@ public sealed class MetricEndpointTests
         };
 
         var result = await IngestAsync(packet, db);
+
+        Assert.Equal((int)HttpStatusCode.BadRequest, GetStatusCode(result));
+        Assert.Empty(db.PerformanceMetrics);
+    }
+
+    [Fact]
+    public async Task PostMetricRejectsEmptyBatch()
+    {
+        await using var db = CreateDbContext();
+
+        var result = await IngestAsync(Array.Empty<MetricPacket>(), db);
 
         Assert.Equal((int)HttpStatusCode.BadRequest, GetStatusCode(result));
         Assert.Empty(db.PerformanceMetrics);
@@ -185,12 +224,36 @@ public sealed class MetricEndpointTests
         NetraDbContext db,
         Guid? ownerUserId = null)
     {
+        return IngestAsync(JsonSerializer.SerializeToElement(
+            packet,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            db,
+            ownerUserId);
+    }
+
+    private static Task<IResult> IngestAsync(
+        MetricPacket[] packets,
+        NetraDbContext db,
+        Guid? ownerUserId = null)
+    {
+        return IngestAsync(JsonSerializer.SerializeToElement(
+            packets,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            db,
+            ownerUserId);
+    }
+
+    private static Task<IResult> IngestAsync(
+        JsonElement payload,
+        NetraDbContext db,
+        Guid? ownerUserId = null)
+    {
         var httpContext = new DefaultHttpContext();
         httpContext.Items[IngestionTokenFilter.OwnerUserIdKey] =
             ownerUserId ?? TestOwnerUserId;
 
         return MetricEndpoints.IngestMetricAsync(
-            packet,
+            payload,
             httpContext,
             db,
             NullLogger<Program>.Instance,

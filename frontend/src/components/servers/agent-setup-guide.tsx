@@ -29,7 +29,7 @@ const ARCH_LABELS: Record<string, string> = {
 
 const OS_ORDER = ["linux", "darwin", "windows"]
 const AGENT_DOWNLOAD_BASE_URL =
-  "https://github.com/stonehappi/NetraScope/raw/main/agent/dist"
+  "https://github.com/stonehappi/NetraScope/releases/latest/download"
 const AGENT_DOWNLOADS: AgentDownloadLink[] = OS_ORDER.flatMap((os) =>
   ["amd64", "arm64"].map((arch) => {
     const fileName = agentFileName(os, arch)

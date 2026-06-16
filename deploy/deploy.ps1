@@ -1,8 +1,7 @@
 # One-shot deploy for Windows (PowerShell):
 #  1. Make sure env files exist (copied from .env.example templates).
 #  2. Cross-compile the Go agent for all supported platforms (unless -SkipAgent).
-#  3. Publish the binaries to the backend's downloads folder.
-#  4. Build and start the full stack with docker compose.
+#  3. Build and start the full stack with docker compose.
 #
 # Usage: .\deploy\deploy.ps1 [-SkipAgent]
 #   -SkipAgent  Skip building/publishing the Go agent binaries (no Go required).
@@ -35,6 +34,7 @@ else {
         Write-Error "Go is required to build the agent. Install Go 1.25+, or pass -SkipAgent."
         exit 1
     }
+    $agentVersion = if ($env:AGENT_VERSION) { $env:AGENT_VERSION } else { "dev" }
 
     Push-Location agent
     try {
@@ -57,7 +57,7 @@ else {
             $env:CGO_ENABLED = "0"
             $env:GOOS = $p.os
             $env:GOARCH = $p.arch
-            go build -trimpath -ldflags="-s -w" -o $out ./cmd/netrascope-agent
+            go build -trimpath -ldflags="-s -w -X main.version=$agentVersion" -o $out ./cmd/netrascope-agent
         }
     }
     finally {
@@ -65,10 +65,7 @@ else {
         Pop-Location
     }
 
-    Write-Host "==> Publishing agent binaries for download"
-    $downloadsDir = "backend/src/NetraScope.Core/wwwroot/downloads"
-    New-Item -ItemType Directory -Force -Path $downloadsDir | Out-Null
-    Copy-Item "agent/dist/netrascope-agent-*-*" $downloadsDir -Force
+    Write-Host "==> Agent binaries available in agent/dist"
 }
 
 Write-Host "==> Building and starting services"

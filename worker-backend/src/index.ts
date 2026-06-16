@@ -22,6 +22,7 @@ type Variables = {
 const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 const maxTagLength = 50
 const maxTagsPerServer = 20
+const maxMetricBatchSize = 500
 
 app.use("*", async (context, next) => {
   const origin: string = context.env.FRONTEND_ORIGIN
@@ -129,35 +130,42 @@ app.post("/api/metrics", async (context) => {
     return context.json({ title: "Unauthorized" }, 401)
   }
 
-  const packet = await readJson<Partial<MetricPacket>>(context)
-  const errors = validateMetric(packet)
+  const payload = await readJson<unknown>(context)
+  const metrics = normalizeMetricPayload(payload)
+  if ("errors" in metrics) {
+    return validationProblem(context, metrics.errors)
+  }
+
+  const errors = validateMetrics(metrics.packets)
   if (Object.keys(errors).length > 0) {
     return validationProblem(context, errors)
   }
 
-  const ingested = await storage.ingestMetric(
-    packet as MetricPacket,
-    context.req.header("CF-Connecting-IP") ?? null,
-    ownerUserId,
-  )
-  if (!ingested) {
-    return context.json(
-      {
-        title: "Server ID Conflict",
-        detail: "This server ID is already owned by another account.",
-      },
-      409,
+  for (const packet of metrics.packets) {
+    const ingested = await storage.ingestMetric(
+      packet,
+      context.req.header("CF-Connecting-IP") ?? null,
+      ownerUserId,
     )
-  }
+    if (!ingested) {
+      return context.json(
+        {
+          title: "Server ID Conflict",
+          detail: "This server ID is already owned by another account.",
+        },
+        409,
+      )
+    }
 
-  if (packet.cpuUsagePct! > 90) {
-    console.warn(
-      JSON.stringify({
-        event: "high_cpu",
-        serverId: packet.serverId,
-        cpuUsagePct: packet.cpuUsagePct,
-      }),
-    )
+    if (packet.cpuUsagePct > 90) {
+      console.warn(
+        JSON.stringify({
+          event: "high_cpu",
+          serverId: packet.serverId,
+          cpuUsagePct: packet.cpuUsagePct,
+        }),
+      )
+    }
   }
 
   return context.body(null, 202)
@@ -348,8 +356,39 @@ function validateMetric(packet: Partial<MetricPacket>): Record<string, string[]>
   return errors
 }
 
+function normalizeMetricPayload(
+  value: unknown,
+): { packets: MetricPacket[] } | { errors: Record<string, string[]> } {
+  const packets = Array.isArray(value) ? value : [value]
+  if (packets.length === 0) {
+    return { errors: { Metrics: ["At least one metric packet is required."] } }
+  }
+  if (packets.length > maxMetricBatchSize) {
+    return { errors: { Metrics: [`Metric batches cannot exceed ${maxMetricBatchSize} packets.`] } }
+  }
+  if (!packets.every((packet) => packet && typeof packet === "object" && !Array.isArray(packet))) {
+    return {
+      errors: {
+        Metrics: ["Metric payload must be a metric object or an array of metric objects."],
+      },
+    }
+  }
+  return { packets: packets as MetricPacket[] }
+}
+
+function validateMetrics(packets: MetricPacket[]): Record<string, string[]> {
+  const errors: Record<string, string[]> = {}
+  packets.forEach((packet, index) => {
+    const packetErrors = validateMetric(packet)
+    for (const [key, value] of Object.entries(packetErrors)) {
+      errors[`Metrics[${index}].${key}`] = value
+    }
+  })
+  return errors
+}
+
 function isPercentage(value: number | undefined): boolean {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
 }
 
 function normalizeTag(tag: string): string | null {

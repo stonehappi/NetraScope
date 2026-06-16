@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -32,8 +33,13 @@ const (
 	defaultServerURL = "http://localhost:5050/api/metrics"
 	defaultInterval  = 10 * time.Second
 	defaultTimeout   = 5 * time.Second
+	defaultBatchSize = 6
+	defaultFlush     = 60 * time.Second
+	updateTimeout    = 2 * time.Minute
 	flushLimit       = 100
 )
+
+var version = "dev"
 
 type config struct {
 	ServerURL string
@@ -42,6 +48,15 @@ type config struct {
 	BufferDB  string
 	Interval  time.Duration
 	Timeout   time.Duration
+	BatchSize int
+	Flush     time.Duration
+}
+
+type commandOptions struct {
+	ServiceAction string
+	ShowVersion   bool
+	Update        bool
+	UpdateURL     string
 }
 
 type metricPacket struct {
@@ -76,9 +91,26 @@ func (w serviceLogWriter) Write(message []byte) (int, error) {
 }
 
 func main() {
-	cfg, serviceAction, err := loadConfig()
+	cfg, commands, err := loadConfig()
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if commands.ShowVersion {
+		fmt.Println(versionText())
+		return
+	}
+
+	if commands.Update {
+		ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
+		defer cancel()
+
+		client := &http.Client{Timeout: updateTimeout}
+		if err := updateAgent(ctx, client, commands.UpdateURL, ""); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("NetraScope agent updated from %s", commands.UpdateURL)
+		return
 	}
 
 	serviceConfig := &service.Config{
@@ -113,8 +145,8 @@ func main() {
 		log.SetOutput(serviceLogWriter{logger: serviceLogger})
 	}
 
-	if serviceAction != "" {
-		if err := controlService(systemService, serviceAction); err != nil {
+	if commands.ServiceAction != "" {
+		if err := controlService(systemService, commands.ServiceAction); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -177,46 +209,61 @@ func (p *agentProgram) Stop(_ service.Service) error {
 	return nil
 }
 
-func loadConfig() (config, string, error) {
+func loadConfig() (config, commandOptions, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		return config{}, "", fmt.Errorf("read hostname: %w", err)
+		return config{}, commandOptions{}, fmt.Errorf("read hostname: %w", err)
 	}
 
 	defaultBuffer := defaultBufferPath()
 
 	cfg := config{}
-	var serviceAction string
+	commands := commandOptions{}
 	flag.StringVar(&cfg.ServerURL, "server-url", envOr("NETRASCOPE_SERVER_URL", defaultServerURL), "metrics ingestion endpoint")
 	flag.StringVar(&cfg.ServerID, "server-id", envOr("NETRASCOPE_SERVER_ID", hostname), "unique server identifier")
 	flag.StringVar(&cfg.Token, "token", os.Getenv("NETRASCOPE_TOKEN"), "optional bearer token")
 	flag.StringVar(&cfg.BufferDB, "buffer-db", envOr("NETRASCOPE_BUFFER_DB", defaultBuffer), "SQLite offline buffer path")
 	flag.DurationVar(&cfg.Interval, "interval", envDuration("NETRASCOPE_INTERVAL", defaultInterval), "metric collection interval")
 	flag.DurationVar(&cfg.Timeout, "timeout", envDuration("NETRASCOPE_TIMEOUT", defaultTimeout), "HTTP request timeout")
-	flag.StringVar(&serviceAction, "service", "", "service action: install, uninstall, start, stop, restart, or status")
+	flag.IntVar(&cfg.BatchSize, "batch-size", envInt("NETRASCOPE_BATCH_SIZE", defaultBatchSize), "maximum locally buffered metrics sent in one request")
+	flag.DurationVar(&cfg.Flush, "flush-interval", envDuration("NETRASCOPE_FLUSH_INTERVAL", defaultFlush), "maximum time between metric batch uploads")
+	flag.StringVar(&commands.ServiceAction, "service", "", "service action: install, uninstall, start, stop, restart, or status")
+	flag.BoolVar(&commands.ShowVersion, "version", false, "print the agent version and exit")
+	flag.BoolVar(&commands.Update, "update", false, "download and install the latest agent release for this platform")
+	flag.StringVar(&commands.UpdateURL, "update-url", defaultUpdateURL(), "agent binary URL used by -update")
 	flag.Parse()
 
-	serviceAction = strings.ToLower(strings.TrimSpace(serviceAction))
-	if serviceAction == "install" && os.Getenv("NETRASCOPE_BUFFER_DB") == "" && !flagWasSet("buffer-db") {
+	commands.ServiceAction = strings.ToLower(strings.TrimSpace(commands.ServiceAction))
+	commands.UpdateURL = strings.TrimSpace(commands.UpdateURL)
+	if commands.ServiceAction == "install" && os.Getenv("NETRASCOPE_BUFFER_DB") == "" && !flagWasSet("buffer-db") {
 		cfg.BufferDB = defaultServiceBufferPath()
 	}
 
 	cfg.ServerURL = strings.TrimSpace(cfg.ServerURL)
 	cfg.ServerID = strings.TrimSpace(cfg.ServerID)
 	if cfg.ServerURL == "" {
-		return config{}, "", errors.New("server URL cannot be empty")
+		return config{}, commandOptions{}, errors.New("server URL cannot be empty")
 	}
 	if cfg.ServerID == "" {
-		return config{}, "", errors.New("server ID cannot be empty")
+		return config{}, commandOptions{}, errors.New("server ID cannot be empty")
 	}
 	if cfg.Interval <= 0 {
-		return config{}, "", errors.New("interval must be greater than zero")
+		return config{}, commandOptions{}, errors.New("interval must be greater than zero")
 	}
 	if cfg.Timeout <= 0 {
-		return config{}, "", errors.New("timeout must be greater than zero")
+		return config{}, commandOptions{}, errors.New("timeout must be greater than zero")
+	}
+	if cfg.BatchSize <= 0 {
+		return config{}, commandOptions{}, errors.New("batch size must be greater than zero")
+	}
+	if cfg.Flush <= 0 {
+		return config{}, commandOptions{}, errors.New("flush interval must be greater than zero")
+	}
+	if commands.Update && commands.UpdateURL == "" {
+		return config{}, commandOptions{}, errors.New("update URL cannot be empty")
 	}
 
-	return cfg, serviceAction, nil
+	return cfg, commands, nil
 }
 
 func serviceArguments(cfg config) []string {
@@ -226,6 +273,8 @@ func serviceArguments(cfg config) []string {
 		"-buffer-db", cfg.BufferDB,
 		"-interval", cfg.Interval.String(),
 		"-timeout", cfg.Timeout.String(),
+		"-batch-size", fmt.Sprint(cfg.BatchSize),
+		"-flush-interval", cfg.Flush.String(),
 	}
 	if cfg.Token != "" {
 		arguments = append(arguments, "-token", cfg.Token)
@@ -330,6 +379,124 @@ func serviceStatusName(status service.Status) string {
 	}
 }
 
+func versionText() string {
+	return fmt.Sprintf("netrascope-agent %s (%s/%s)", version, runtime.GOOS, runtime.GOARCH)
+}
+
+func defaultUpdateURL() string {
+	return "https://github.com/stonehappi/NetraScope/releases/latest/download/" + releaseAssetName(runtime.GOOS, runtime.GOARCH)
+}
+
+func releaseAssetName(goos, goarch string) string {
+	name := fmt.Sprintf("netrascope-agent-%s-%s", goos, goarch)
+	if goos == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
+func updateAgent(ctx context.Context, client *http.Client, sourceURL, destinationPath string) error {
+	if sourceURL == "" {
+		return errors.New("update URL cannot be empty")
+	}
+
+	if destinationPath == "" {
+		executable, err := currentExecutablePath()
+		if err != nil {
+			return err
+		}
+		destinationPath = executable
+	}
+
+	currentInfo, err := os.Stat(destinationPath)
+	if err != nil {
+		return fmt.Errorf("read current executable: %w", err)
+	}
+	if currentInfo.IsDir() {
+		return fmt.Errorf("current executable path %q is a directory", destinationPath)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return fmt.Errorf("create update request: %w", err)
+	}
+	request.Header.Set("User-Agent", "NetraScope-Agent/"+version)
+
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("download update: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+		return fmt.Errorf("download update: server returned %s", response.Status)
+	}
+
+	destinationDir := filepath.Dir(destinationPath)
+	tempFile, err := os.CreateTemp(destinationDir, filepath.Base(destinationPath)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary update file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	written, copyErr := io.Copy(tempFile, response.Body)
+	if copyErr != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("write temporary update file: %w", copyErr)
+	}
+	if written == 0 {
+		_ = tempFile.Close()
+		return errors.New("download update: response body was empty")
+	}
+	if err := tempFile.Chmod(currentInfo.Mode().Perm()); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("set update file permissions: %w", err)
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("sync update file: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("close update file: %w", err)
+	}
+
+	if runtime.GOOS == "windows" {
+		if err := os.Remove(destinationPath); err != nil {
+			removeTemp = false
+			return fmt.Errorf("downloaded update to %s, but Windows could not replace the current executable; stop the service and replace it manually: %w", tempPath, err)
+		}
+	}
+
+	if err := os.Rename(tempPath, destinationPath); err != nil {
+		if runtime.GOOS == "windows" {
+			removeTemp = false
+			return fmt.Errorf("downloaded update to %s, but Windows could not replace the current executable; stop the service and replace it manually: %w", tempPath, err)
+		}
+		return fmt.Errorf("replace current executable: %w", err)
+	}
+	removeTemp = false
+	return nil
+}
+
+func currentExecutablePath() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("find current executable: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(executable)
+	if err == nil {
+		return resolved, nil
+	}
+	return executable, nil
+}
+
 func run(ctx context.Context, cfg config, db *sql.DB, client *http.Client) error {
 	previousNetwork, err := readNetworkSample()
 	if err != nil {
@@ -339,6 +506,7 @@ func run(ctx context.Context, cfg config, db *sql.DB, client *http.Client) error
 
 	timer := time.NewTimer(0)
 	defer timer.Stop()
+	lastFlush := time.Now()
 
 	for {
 		select {
@@ -350,15 +518,15 @@ func run(ctx context.Context, cfg config, db *sql.DB, client *http.Client) error
 				log.Printf("collect metrics: %v", err)
 			} else {
 				previousNetwork = nextNetwork
-				flushOfflineData(ctx, db, client, cfg)
-				if err := sendMetric(ctx, client, cfg, metric); err != nil {
-					if queueErr := queueMetric(db, metric); queueErr != nil {
-						log.Printf("send metric: %v; buffer metric: %v", err, queueErr)
-					} else {
-						log.Printf("send metric: %v; saved to offline buffer", err)
-					}
+				if err := queueMetric(db, metric); err != nil {
+					log.Printf("buffer metric: %v", err)
 				} else {
-					log.Print("metric sent")
+					shouldFlush, err := shouldFlushOfflineData(db, cfg, lastFlush)
+					if err != nil {
+						log.Printf("inspect offline buffer: %v", err)
+					} else if shouldFlush && flushOfflineData(ctx, db, client, cfg) {
+						lastFlush = time.Now()
+					}
 				}
 			}
 			timer.Reset(cfg.Interval)
@@ -463,16 +631,28 @@ func queueMetric(db *sql.DB, metric metricPacket) error {
 	return err
 }
 
-func flushOfflineData(ctx context.Context, db *sql.DB, client *http.Client, cfg config) {
-	rows, err := db.QueryContext(ctx, "SELECT id, payload FROM metrics ORDER BY id ASC LIMIT ?", flushLimit)
+func shouldFlushOfflineData(db *sql.DB, cfg config, lastFlush time.Time) (bool, error) {
+	if time.Since(lastFlush) >= cfg.Flush {
+		return true, nil
+	}
+	var queued int
+	if err := db.QueryRow("SELECT COUNT(*) FROM metrics").Scan(&queued); err != nil {
+		return false, err
+	}
+	return queued >= cfg.BatchSize, nil
+}
+
+func flushOfflineData(ctx context.Context, db *sql.DB, client *http.Client, cfg config) bool {
+	limit := min(cfg.BatchSize, flushLimit)
+	rows, err := db.QueryContext(ctx, "SELECT id, payload FROM metrics ORDER BY id ASC LIMIT ?", limit)
 	if err != nil {
 		log.Printf("read offline buffer: %v", err)
-		return
+		return false
 	}
 
 	type queuedMetric struct {
 		ID      int64
-		Payload []byte
+		Payload string
 	}
 	var queued []queuedMetric
 	for rows.Next() {
@@ -488,24 +668,41 @@ func flushOfflineData(ctx context.Context, db *sql.DB, client *http.Client, cfg 
 	}
 	rows.Close()
 
+	if len(queued) == 0 {
+		return true
+	}
+
+	payloads := make([]json.RawMessage, len(queued))
+	for index, item := range queued {
+		payloads[index] = json.RawMessage(item.Payload)
+	}
+
+	if err := sendMetricBatch(ctx, client, cfg, payloads); err != nil {
+		log.Printf("flush metric batch: %v", err)
+		return false
+	}
+
 	for _, item := range queued {
-		if err := sendPayload(ctx, client, cfg, item.Payload); err != nil {
-			log.Printf("flush offline buffer: %v", err)
-			return
-		}
 		if _, err := db.ExecContext(ctx, "DELETE FROM metrics WHERE id = ?", item.ID); err != nil {
 			log.Printf("delete flushed metric: %v", err)
-			return
+			return false
 		}
 	}
 
-	if len(queued) > 0 {
-		log.Printf("flushed %d offline metrics", len(queued))
-	}
+	log.Printf("flushed %d buffered metrics", len(queued))
+	return true
 }
 
 func sendMetric(ctx context.Context, client *http.Client, cfg config, metric metricPacket) error {
 	payload, err := json.Marshal(metric)
+	if err != nil {
+		return err
+	}
+	return sendPayload(ctx, client, cfg, payload)
+}
+
+func sendMetricBatch(ctx context.Context, client *http.Client, cfg config, metrics []json.RawMessage) error {
+	payload, err := json.Marshal(metrics)
 	if err != nil {
 		return err
 	}
@@ -518,7 +715,7 @@ func sendPayload(ctx context.Context, client *http.Client, cfg config, payload [
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("User-Agent", "NetraScope-Agent/1")
+	request.Header.Set("User-Agent", "NetraScope-Agent/"+version)
 	if cfg.Token != "" {
 		request.Header.Set("Authorization", "Bearer "+cfg.Token)
 	}
@@ -586,6 +783,18 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		log.Fatalf("%s must be a valid duration: %v", name, err)
+	}
+	return parsed
+}
+
+func envInt(name string, fallback int) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		log.Fatalf("%s must be a valid integer: %v", name, err)
 	}
 	return parsed
 }

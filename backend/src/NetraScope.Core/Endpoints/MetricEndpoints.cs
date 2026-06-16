@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NetraScope.Core.Auth;
@@ -13,12 +14,13 @@ public static class MetricEndpoints
 {
     private const int DefaultHistoryMinutes = 60;
     private const int MaxHistoryMinutes = 1440;
+    private const int MaxBatchSize = 500;
 
     public static IEndpointRouteBuilder MapMetricEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapPost("/api/metrics", IngestMetricAsync)
             .WithName("IngestMetric")
-            .WithSummary("Stores one server metric packet")
+            .WithSummary("Stores one or more server metric packets")
             .AllowAnonymous()
             .AddEndpointFilter<IngestionTokenFilter>()
             .Produces(StatusCodes.Status202Accepted)
@@ -71,13 +73,20 @@ public static class MetricEndpoints
     }
 
     public static async Task<IResult> IngestMetricAsync(
-        [FromBody] MetricPacket packet,
+        [FromBody] JsonElement payload,
         HttpContext httpContext,
         NetraDbContext db,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
-        var validationErrors = Validate(packet);
+        var parseResult = ReadMetricPackets(payload);
+        if (parseResult.Errors.Count > 0)
+        {
+            return Results.ValidationProblem(parseResult.Errors);
+        }
+
+        var packets = parseResult.Packets;
+        var validationErrors = Validate(packets);
         if (validationErrors.Count > 0)
         {
             return Results.ValidationProblem(validationErrors);
@@ -91,54 +100,44 @@ public static class MetricEndpoints
             ? await db.Database.BeginTransactionAsync(cancellationToken)
             : null;
 
-        bool serverAccepted;
-        if (isNpgsql)
+        foreach (var packet in packets)
         {
-            var affectedRows = await db.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                INSERT INTO servers ("Id", "HostName", "IpAddress", "LastHeartbeatAt", "OwnerUserId")
-                VALUES ({packet.ServerId}, {packet.ServerId}, {ipAddress}, {receivedAt}, {ownerUserId})
-                ON CONFLICT ("Id") DO UPDATE SET
-                    "HostName" = EXCLUDED."HostName",
-                    "IpAddress" = EXCLUDED."IpAddress",
-                    "LastHeartbeatAt" = EXCLUDED."LastHeartbeatAt",
-                    "OwnerUserId" = EXCLUDED."OwnerUserId"
-                WHERE servers."OwnerUserId" IS NULL
-                   OR servers."OwnerUserId" = EXCLUDED."OwnerUserId"
-                """,
-                cancellationToken);
-            serverAccepted = affectedRows == 1;
-        }
-        else
-        {
-            serverAccepted = await UpsertServerForNonRelationalProviderAsync(
-                db,
-                packet.ServerId,
-                ipAddress,
-                receivedAt,
-                ownerUserId,
-                cancellationToken);
-        }
+            var serverAccepted = isNpgsql
+                ? await UpsertServerForNpgsqlAsync(
+                    db,
+                    packet.ServerId,
+                    ipAddress,
+                    receivedAt,
+                    ownerUserId,
+                    cancellationToken)
+                : await UpsertServerForNonRelationalProviderAsync(
+                    db,
+                    packet.ServerId,
+                    ipAddress,
+                    receivedAt,
+                    ownerUserId,
+                    cancellationToken);
 
-        if (!serverAccepted)
-        {
-            return Results.Conflict(new
+            if (!serverAccepted)
             {
-                title = "Server ID Conflict",
-                detail = "This server ID is already owned by another account.",
+                return Results.Conflict(new
+                {
+                    title = "Server ID Conflict",
+                    detail = "This server ID is already owned by another account.",
+                });
+            }
+
+            db.PerformanceMetrics.Add(new PerformanceMetric
+            {
+                ServerId = packet.ServerId,
+                Timestamp = packet.Timestamp.ToUniversalTime(),
+                CpuUsagePct = packet.CpuUsagePct,
+                MemoryUsedBytes = packet.MemoryUsedBytes,
+                MemoryTotalBytes = packet.MemoryTotalBytes,
+                DiskUtilizationPct = packet.DiskUtilizationPct,
+                NetworkInBytesSec = packet.NetworkInBytesSec,
             });
         }
-
-        db.PerformanceMetrics.Add(new PerformanceMetric
-        {
-            ServerId = packet.ServerId,
-            Timestamp = packet.Timestamp.ToUniversalTime(),
-            CpuUsagePct = packet.CpuUsagePct,
-            MemoryUsedBytes = packet.MemoryUsedBytes,
-            MemoryTotalBytes = packet.MemoryTotalBytes,
-            DiskUtilizationPct = packet.DiskUtilizationPct,
-            NetworkInBytesSec = packet.NetworkInBytesSec,
-        });
 
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null)
@@ -146,7 +145,7 @@ public static class MetricEndpoints
             await transaction.CommitAsync(cancellationToken);
         }
 
-        if (packet.CpuUsagePct > 90.0f)
+        foreach (var packet in packets.Where(packet => packet.CpuUsagePct > 90.0f))
         {
             logger.LogCritical(
                 "ALERT: Server {ServerId} CPU is critically high at {CpuUsagePct:F2}%",
@@ -155,6 +154,52 @@ public static class MetricEndpoints
         }
 
         return Results.Accepted();
+    }
+
+    private static (MetricPacket[] Packets, Dictionary<string, string[]> Errors) ReadMetricPackets(
+        JsonElement payload)
+    {
+        var errors = new Dictionary<string, string[]>();
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        try
+        {
+            var packets = payload.ValueKind switch
+            {
+                JsonValueKind.Object => [payload.Deserialize<MetricPacket>(options)!],
+                JsonValueKind.Array => payload.Deserialize<MetricPacket[]>(options) ?? [],
+                _ => [],
+            };
+
+            if (packets.Length == 0)
+            {
+                errors["Metrics"] = ["At least one metric packet is required."];
+            }
+            else if (packets.Length > MaxBatchSize)
+            {
+                errors["Metrics"] = [$"Metric batches cannot exceed {MaxBatchSize} packets."];
+            }
+
+            return (packets, errors);
+        }
+        catch (JsonException)
+        {
+            errors["Metrics"] = ["Metric payload must be a metric object or an array of metric objects."];
+            return ([], errors);
+        }
+    }
+
+    private static Dictionary<string, string[]> Validate(IReadOnlyList<MetricPacket> packets)
+    {
+        var errors = new Dictionary<string, string[]>();
+        for (var index = 0; index < packets.Count; index++)
+        {
+            foreach (var (key, value) in Validate(packets[index]))
+            {
+                errors[$"Metrics[{index}].{key}"] = value;
+            }
+        }
+        return errors;
     }
 
     private static Dictionary<string, string[]> Validate(MetricPacket packet)
@@ -205,6 +250,30 @@ public static class MetricEndpoints
 
     private static bool IsPercentage(float value) =>
         float.IsFinite(value) && value is >= 0 and <= 100;
+
+    private static async Task<bool> UpsertServerForNpgsqlAsync(
+        NetraDbContext db,
+        string serverId,
+        string? ipAddress,
+        DateTimeOffset receivedAt,
+        Guid ownerUserId,
+        CancellationToken cancellationToken)
+    {
+        var affectedRows = await db.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            INSERT INTO servers ("Id", "HostName", "IpAddress", "LastHeartbeatAt", "OwnerUserId")
+            VALUES ({serverId}, {serverId}, {ipAddress}, {receivedAt}, {ownerUserId})
+            ON CONFLICT ("Id") DO UPDATE SET
+                "HostName" = EXCLUDED."HostName",
+                "IpAddress" = EXCLUDED."IpAddress",
+                "LastHeartbeatAt" = EXCLUDED."LastHeartbeatAt",
+                "OwnerUserId" = EXCLUDED."OwnerUserId"
+            WHERE servers."OwnerUserId" IS NULL
+               OR servers."OwnerUserId" = EXCLUDED."OwnerUserId"
+            """,
+            cancellationToken);
+        return affectedRows == 1;
+    }
 
     private static async Task<bool> UpsertServerForNonRelationalProviderAsync(
         NetraDbContext db,

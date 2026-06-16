@@ -2,8 +2,7 @@
 # One-shot deploy for macOS / Linux:
 #  1. Make sure env files exist (copied from .env.example templates).
 #  2. Cross-compile the Go agent for all supported platforms (unless --skip-agent).
-#  3. Publish the binaries to the backend's downloads folder.
-#  4. Build and start the full stack with docker compose.
+#  3. Build and start the full stack with docker compose.
 #
 # Usage: ./deploy/deploy.sh [--skip-agent]
 #   --skip-agent  Skip building/publishing the Go agent binaries (no Go required).
@@ -35,6 +34,7 @@ if [ "$SKIP_AGENT" -eq 1 ]; then
 else
   echo "==> Building agent binaries"
   command -v go >/dev/null || { echo "Go is required to build the agent. Install Go 1.25+, or pass --skip-agent." >&2; exit 1; }
+  AGENT_VERSION="${AGENT_VERSION:-dev}"
 
   (
     cd agent
@@ -56,14 +56,11 @@ else
       [ "$os" = "windows" ] && ext=".exe"
       out="dist/netrascope-agent-${os}-${arch}${ext}"
       echo "  building $out"
-      CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$out" ./cmd/netrascope-agent
+      CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w -X main.version=${AGENT_VERSION}" -o "$out" ./cmd/netrascope-agent
     done
   )
 
-  echo "==> Publishing agent binaries for download"
-  DOWNLOADS_DIR="backend/src/NetraScope.Core/wwwroot/downloads"
-  mkdir -p "$DOWNLOADS_DIR"
-  cp agent/dist/netrascope-agent-*-* "$DOWNLOADS_DIR/"
+  echo "==> Agent binaries available in agent/dist"
 fi
 
 echo "==> Building and starting services"

@@ -94,6 +94,41 @@ netrascope-agent -service restart
 netrascope-agent -service uninstall
 ```
 
+## 5. Version and updates
+
+Check the installed agent version:
+
+```sh
+netrascope-agent -version
+```
+
+Update to the latest GitHub Release binary for your platform:
+
+```sh
+sudo netrascope-agent -update
+sudo netrascope-agent -service restart
+```
+
+Restarting the service makes the newly installed binary take over from the
+already running process.
+
+To install a pinned release instead of the latest release, pass the exact
+asset URL:
+
+```sh
+sudo netrascope-agent \
+  -update \
+  -update-url https://github.com/stonehappi/NetraScope/releases/download/v1.0.0/netrascope-agent-linux-amd64
+```
+
+On Windows, stop the service before updating:
+
+```powershell
+.\netrascope-agent.exe -service stop
+.\netrascope-agent.exe -update
+.\netrascope-agent.exe -service start
+```
+
 ## Configuration reference
 
 Every setting can be passed as a command-line flag or an environment
@@ -107,6 +142,15 @@ variable. Flags take priority if both are set.
 | `-buffer-db` | `NETRASCOPE_BUFFER_DB` | OS cache directory | Path to the local SQLite offline buffer. |
 | `-interval` | `NETRASCOPE_INTERVAL` | `10s` | How often metrics are collected and sent. |
 | `-timeout` | `NETRASCOPE_TIMEOUT` | `5s` | HTTP request timeout per metric send. |
+| `-batch-size` | `NETRASCOPE_BATCH_SIZE` | `6` | Maximum locally buffered samples sent in one API request. |
+| `-flush-interval` | `NETRASCOPE_FLUSH_INTERVAL` | `60s` | Maximum time between batch uploads. |
+| `-version` | none | false | Print the embedded agent version and exit. |
+| `-update` | none | false | Replace the executable with the latest release binary for this platform. |
+| `-update-url` | none | GitHub latest release URL | Download URL used by `-update`. |
+
+The default `-interval 10s`, `-batch-size 6`, and `-flush-interval 60s`
+combination keeps 10-second metric resolution but reduces API requests to
+about one upload per minute per server.
 
 ### Examples
 
@@ -117,6 +161,8 @@ Custom server name and faster reporting interval:
   -server-url https://monitor.example.com/api/metrics \
   -server-id web-01 \
   -interval 5s \
+  -batch-size 12 \
+  -flush-interval 1m \
   -token YOUR_TOKEN
 ```
 

@@ -27,6 +27,8 @@ Flags override their corresponding environment variables.
 | `-buffer-db` | `NETRASCOPE_BUFFER_DB` | OS user cache directory |
 | `-interval` | `NETRASCOPE_INTERVAL` | `10s` |
 | `-timeout` | `NETRASCOPE_TIMEOUT` | `5s` |
+| `-batch-size` | `NETRASCOPE_BATCH_SIZE` | `6` |
+| `-flush-interval` | `NETRASCOPE_FLUSH_INTERVAL` | `60s` |
 
 Use an HTTPS endpoint in production. The token is sent as a bearer token and
 is never printed by the agent. Set `-token` (or `NETRASCOPE_TOKEN`) to the
@@ -79,15 +81,56 @@ service points to that executable. Installed services store their offline
 buffer under the operating system's shared application-data directory by
 default.
 
-## Release Builds
+By default, the agent still samples every 10 seconds, but it stores samples in
+the local SQLite buffer and uploads up to 6 metrics every 60 seconds. This
+reduces API request volume while preserving the same raw metric resolution.
+Lower `-flush-interval` for fresher dashboards, or raise `-batch-size` for
+fewer API requests.
 
-Build with `CGO_ENABLED=0` to produce standalone executables:
+## Version and Updates
+
+Print the embedded agent version:
 
 ```sh
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/netrascope-agent-linux-amd64 ./cmd/netrascope-agent
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o dist/netrascope-agent-linux-arm64 ./cmd/netrascope-agent
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/netrascope-agent-windows-amd64.exe ./cmd/netrascope-agent
-CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o dist/netrascope-agent-windows-arm64.exe ./cmd/netrascope-agent
-CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/netrascope-agent-darwin-amd64 ./cmd/netrascope-agent
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o dist/netrascope-agent-darwin-arm64 ./cmd/netrascope-agent
+netrascope-agent -version
 ```
+
+Update the executable in place from the latest GitHub Release asset for the
+current operating system and CPU architecture:
+
+```sh
+sudo netrascope-agent -update
+sudo netrascope-agent -service restart
+```
+
+Use `-update-url` to install a pinned release, private mirror, or manually
+hosted binary:
+
+```sh
+sudo netrascope-agent \
+  -update \
+  -update-url https://github.com/stonehappi/NetraScope/releases/download/v1.0.0/netrascope-agent-linux-amd64
+```
+
+Restart the service after updating so the running process uses the new binary.
+On Windows, stop the service before updating. If Windows cannot replace the
+running executable, the agent leaves the downloaded file path in the error
+message so you can move it into place manually.
+
+## Release Builds
+
+Build with `CGO_ENABLED=0` to produce standalone executables. Set
+`AGENT_VERSION` when using the deploy scripts, or pass `-X main.version=...`
+directly when running `go build`:
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=1.0.0" -o dist/netrascope-agent-linux-amd64 ./cmd/netrascope-agent
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=1.0.0" -o dist/netrascope-agent-linux-arm64 ./cmd/netrascope-agent
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=1.0.0" -o dist/netrascope-agent-windows-amd64.exe ./cmd/netrascope-agent
+CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=1.0.0" -o dist/netrascope-agent-windows-arm64.exe ./cmd/netrascope-agent
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=1.0.0" -o dist/netrascope-agent-darwin-amd64 ./cmd/netrascope-agent
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=1.0.0" -o dist/netrascope-agent-darwin-arm64 ./cmd/netrascope-agent
+```
+
+Pushing a tag like `v1.0.0` runs the GitHub Actions release workflow and
+publishes these binaries to the matching GitHub Release.

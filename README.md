@@ -103,8 +103,9 @@ and JWT secret in `.env`.
 
 ## Connect A Server
 
-Download or build the agent for the server's operating system, place it at a
-permanent path, and test it in the foreground:
+Download the agent for the server's operating system from the latest GitHub
+Release, or build it locally, place it at a permanent path, and test it in the
+foreground:
 
 ```sh
 ./netrascope-agent \
@@ -131,7 +132,8 @@ Windows PowerShell must be run as Administrator:
 ```
 
 The same binary supports `status`, `start`, `stop`, `restart`, and `uninstall`
-service actions. See the [agent guide](agent/README.md) for all flags,
+service actions. It also supports `-version` and `-update` for release-based
+agent maintenance. See the [agent guide](agent/README.md) for all flags,
 environment variables, build commands, and troubleshooting steps.
 
 ## Development
