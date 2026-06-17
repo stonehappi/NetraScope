@@ -326,6 +326,8 @@ research.
 
 ### Production deployment guides
 
+- **[Recommended production path](DEPLOYMENT.md)** — Cloudflare Pages, Worker/D1,
+  and GitHub Releases, end to end.
 - [Backend on IIS](backend/deploy/deploy.iis.md)
 - [Frontend with nginx](frontend/deploy/deploy.nginx.md)
 - [Worker backend on Cloudflare D1](worker-backend/deploy.d1.md)
