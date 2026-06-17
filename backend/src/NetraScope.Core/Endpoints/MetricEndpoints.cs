@@ -8,6 +8,7 @@ using NetraScope.Core.Contracts;
 using NetraScope.Core.Data;
 using NetraScope.Core.Entities;
 using NetraScope.Core.Metrics;
+using NetraScope.Core.Security;
 using NetraScope.Shared;
 
 namespace NetraScope.Core.Endpoints;
@@ -127,8 +128,13 @@ public static class MetricEndpoints
             ? await db.Database.BeginTransactionAsync(cancellationToken)
             : null;
 
+        var newlyCreatedServers = new HashSet<string>();
         foreach (var packet in packets)
         {
+            var serverExisted = await db.Servers.AnyAsync(
+                server => server.Id == packet.ServerId,
+                cancellationToken);
+
             var serverAccepted = isNpgsql
                 ? await UpsertServerForNpgsqlAsync(
                     db,
@@ -152,6 +158,21 @@ public static class MetricEndpoints
                     title = "Server ID Conflict",
                     detail = "This server ID is already owned by another account.",
                 });
+            }
+
+            // Record the first sighting of a server as an "agent connected"
+            // timeline event. Deduplicate across packets in the same batch.
+            if (!serverExisted && newlyCreatedServers.Add(packet.ServerId))
+            {
+                AuditLogger.Add(
+                    db,
+                    ownerUserId,
+                    "agent",
+                    "server.created",
+                    "server",
+                    packet.ServerId,
+                    packet.ServerId,
+                    httpContext);
             }
 
             db.PerformanceMetrics.Add(new PerformanceMetric

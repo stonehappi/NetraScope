@@ -59,16 +59,19 @@ Notification targets can include:
 - Slack
 - Webhooks
 
-## 4. Dashboard Upgrade
+## 4. Dashboard Upgrade ✅ Implemented
 
-Add a dedicated alert and server organization experience.
+A dedicated alert and server organization experience.
 
-Useful UI features:
+UI features:
 
-- Sort and filter by status, tag, CPU, memory, or disk.
-- Server groups or environments such as production, staging, and dev.
-- Timeline events for agent install, offline, recovery, token changes, and deletion.
-- Better onboarding and empty states.
+- ✅ Sort and filter by status, tag, CPU, memory, or disk (dashboard).
+- ✅ Server groups / environments such as production, staging, and dev.
+- ✅ Timeline of activity per server — agent install (first metrics), offline,
+  recovery, threshold alerts, and token changes — on the server detail page.
+  A new `server.created` audit event records the agent's first connection;
+  account-wide deletions remain in the Settings audit log.
+- ✅ Onboarding card and empty states.
 
 ## 5. Agent Configuration Profiles ✅ Implemented
 

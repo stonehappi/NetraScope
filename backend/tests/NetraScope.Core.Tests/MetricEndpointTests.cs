@@ -137,6 +137,36 @@ public sealed class MetricEndpointTests
     }
 
     [Fact]
+    public async Task PostMetricLogsServerCreatedAuditOnFirstSightingOnly()
+    {
+        await using var db = CreateDbContext();
+        var packet = ValidPacket() with { ServerId = "server-new" };
+
+        await IngestAsync(packet, db);
+        await IngestAsync(packet with { CpuUsagePct = 50 }, db);
+
+        var created = await db.AuditLogs
+            .Where(log => log.Action == "server.created" && log.EntityId == "server-new")
+            .ToListAsync();
+
+        Assert.Single(created);
+        Assert.Equal("agent", created[0].ActorType);
+        Assert.Equal(TestOwnerUserId, created[0].OwnerUserId);
+    }
+
+    [Fact]
+    public async Task PostMetricBatchLogsSingleServerCreatedAudit()
+    {
+        await using var db = CreateDbContext();
+        var first = ValidPacket() with { ServerId = "server-batch-new", CpuUsagePct = 10 };
+        var second = first with { CpuUsagePct = 20 };
+
+        await IngestAsync([first, second], db);
+
+        Assert.Equal(1, await db.AuditLogs.CountAsync(log => log.Action == "server.created"));
+    }
+
+    [Fact]
     public void GoAgentPayloadMatchesSharedContract()
     {
         const string payload =

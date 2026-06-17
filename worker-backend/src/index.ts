@@ -184,7 +184,9 @@ app.post("/api/metrics", async (context) => {
     return context.json({ title: "Unauthorized" }, 401)
   }
 
+  const newlyCreatedServers = new Set<string>()
   for (const packet of metrics.packets) {
+    const serverExisted = await storage.ownsServer(packet.serverId, ownerUserId)
     const ingested = await storage.ingestMetric(
       packet,
       context.req.header("CF-Connecting-IP") ?? null,
@@ -198,6 +200,13 @@ app.post("/api/metrics", async (context) => {
         },
         409,
       )
+    }
+
+    // Record the first sighting of a server as an "agent connected" timeline
+    // event. Deduplicate across packets in the same batch.
+    if (!serverExisted && !newlyCreatedServers.has(packet.serverId)) {
+      newlyCreatedServers.add(packet.serverId)
+      await audit(storage, ownerUserId, "agent", "server.created", "server", packet.serverId, packet.serverId, context)
     }
 
     await evaluateMetricAlerts(storage, context.env, packet, ownerUserId)

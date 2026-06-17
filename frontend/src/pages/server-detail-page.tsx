@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MetricChart } from "@/components/servers/metric-chart"
+import { ServerActivity } from "@/components/servers/server-activity"
 import { AgentTokenManager } from "@/components/servers/agent-token-manager"
 import { StatusBadge } from "@/components/servers/status-badge"
 import { TagEditor } from "@/components/servers/tag-editor"
@@ -281,6 +282,8 @@ export function ServerDetailPage() {
           )}
         </>
       )}
+
+      {server && <ServerActivity serverId={serverId} />}
 
       {server && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
