@@ -8,6 +8,7 @@ using NetraScope.Core.Alerting;
 using NetraScope.Core.Auth;
 using NetraScope.Core.Data;
 using NetraScope.Core.Endpoints;
+using NetraScope.Core.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +25,10 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHttpClient<IAlertNotifier, WebhookAlertNotifier>();
 builder.Services.AddScoped<IAlertingService, AlertingService>();
 builder.Services.AddHostedService<OfflineAlertWorker>();
+builder.Services.Configure<MetricMaintenanceOptions>(
+    builder.Configuration.GetSection(MetricMaintenanceOptions.SectionName));
+builder.Services.AddScoped<IMetricMaintenanceService, MetricMaintenanceService>();
+builder.Services.AddHostedService<MetricMaintenanceWorker>();
 
 var jwtSection = builder.Configuration.GetSection(JwtOptions.SectionName);
 builder.Services.Configure<JwtOptions>(jwtSection);

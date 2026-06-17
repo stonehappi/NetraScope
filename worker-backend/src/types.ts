@@ -38,6 +38,8 @@ export interface MetricRow {
   NetworkInBytesSec: number
 }
 
+export type RollupGranularity = "5m" | "1h"
+
 export interface AlertEventRow {
   Id: number
   ServerId: string

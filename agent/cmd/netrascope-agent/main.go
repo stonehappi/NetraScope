@@ -217,16 +217,26 @@ func loadConfig() (config, commandOptions, error) {
 
 	defaultBuffer := defaultBufferPath()
 
+	// Load an optional config file first so its values become the defaults the
+	// flags fall back to. Precedence is: explicit flag > env var > config file >
+	// built-in default.
+	configPath := configPathFromArgs()
+	fileCfg, err := loadConfigFile(configPath)
+	if err != nil {
+		return config{}, commandOptions{}, err
+	}
+
 	cfg := config{}
 	commands := commandOptions{}
-	flag.StringVar(&cfg.ServerURL, "server-url", envOr("NETRASCOPE_SERVER_URL", defaultServerURL), "metrics ingestion endpoint")
-	flag.StringVar(&cfg.ServerID, "server-id", envOr("NETRASCOPE_SERVER_ID", hostname), "unique server identifier")
-	flag.StringVar(&cfg.Token, "token", os.Getenv("NETRASCOPE_TOKEN"), "optional bearer token")
-	flag.StringVar(&cfg.BufferDB, "buffer-db", envOr("NETRASCOPE_BUFFER_DB", defaultBuffer), "SQLite offline buffer path")
-	flag.DurationVar(&cfg.Interval, "interval", envDuration("NETRASCOPE_INTERVAL", defaultInterval), "metric collection interval")
-	flag.DurationVar(&cfg.Timeout, "timeout", envDuration("NETRASCOPE_TIMEOUT", defaultTimeout), "HTTP request timeout")
-	flag.IntVar(&cfg.BatchSize, "batch-size", envInt("NETRASCOPE_BATCH_SIZE", defaultBatchSize), "maximum locally buffered metrics sent in one request")
-	flag.DurationVar(&cfg.Flush, "flush-interval", envDuration("NETRASCOPE_FLUSH_INTERVAL", defaultFlush), "maximum time between metric batch uploads")
+	flag.StringVar(&configPath, "config", configPath, "path to a TOML config file (NETRASCOPE_CONFIG)")
+	flag.StringVar(&cfg.ServerURL, "server-url", resolveString("NETRASCOPE_SERVER_URL", fileCfg["server_url"], defaultServerURL), "metrics ingestion endpoint")
+	flag.StringVar(&cfg.ServerID, "server-id", resolveString("NETRASCOPE_SERVER_ID", fileCfg["server_id"], hostname), "unique server identifier")
+	flag.StringVar(&cfg.Token, "token", resolveString("NETRASCOPE_TOKEN", fileCfg["token"], ""), "optional bearer token")
+	flag.StringVar(&cfg.BufferDB, "buffer-db", resolveString("NETRASCOPE_BUFFER_DB", fileCfg["buffer_db"], defaultBuffer), "SQLite offline buffer path")
+	flag.DurationVar(&cfg.Interval, "interval", resolveDuration("NETRASCOPE_INTERVAL", fileCfg["interval"], defaultInterval), "metric collection interval")
+	flag.DurationVar(&cfg.Timeout, "timeout", resolveDuration("NETRASCOPE_TIMEOUT", fileCfg["timeout"], defaultTimeout), "HTTP request timeout")
+	flag.IntVar(&cfg.BatchSize, "batch-size", resolveInt("NETRASCOPE_BATCH_SIZE", fileCfg["batch_size"], defaultBatchSize), "maximum locally buffered metrics sent in one request")
+	flag.DurationVar(&cfg.Flush, "flush-interval", resolveDuration("NETRASCOPE_FLUSH_INTERVAL", fileCfg["flush_interval"], defaultFlush), "maximum time between metric batch uploads")
 	flag.StringVar(&commands.ServiceAction, "service", "", "service action: install, uninstall, start, stop, restart, or status")
 	flag.BoolVar(&commands.ShowVersion, "version", false, "print the agent version and exit")
 	flag.BoolVar(&commands.Update, "update", false, "download and install the latest agent release for this platform")
@@ -768,33 +778,140 @@ func flagWasSet(name string) bool {
 	return found
 }
 
-func envOr(name, fallback string) string {
-	if value := os.Getenv(name); value != "" {
+// configFileKeys are the TOML keys the agent understands. Each maps to the
+// matching flag/env setting; unknown keys are rejected to catch typos.
+var configFileKeys = map[string]bool{
+	"server_url":     true,
+	"server_id":      true,
+	"token":          true,
+	"buffer_db":      true,
+	"interval":       true,
+	"timeout":        true,
+	"batch_size":     true,
+	"flush_interval": true,
+}
+
+// configPathFromArgs returns the config file path from -config/--config (before
+// the main flags are defined) or the NETRASCOPE_CONFIG environment variable.
+func configPathFromArgs() string {
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "-config" || args[i] == "--config":
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		case strings.HasPrefix(args[i], "-config="):
+			return strings.TrimPrefix(args[i], "-config=")
+		case strings.HasPrefix(args[i], "--config="):
+			return strings.TrimPrefix(args[i], "--config=")
+		}
+	}
+	return os.Getenv("NETRASCOPE_CONFIG")
+}
+
+// loadConfigFile reads a flat TOML config (key = value, # comments). It returns
+// an empty map when no path is given and validates keys and value types so
+// malformed files fail fast instead of at flag-parse time.
+func loadConfigFile(path string) (map[string]string, error) {
+	if strings.TrimSpace(path) == "" {
+		return map[string]string{}, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+
+	values := map[string]string{}
+	for index, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			return nil, fmt.Errorf("config file line %d is not key = value: %q", index+1, raw)
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		if !configFileKeys[key] {
+			return nil, fmt.Errorf("config file line %d has unknown key %q", index+1, key)
+		}
+		values[key] = unquote(strings.TrimSpace(value))
+	}
+
+	if _, err := time.ParseDuration(values["interval"]); values["interval"] != "" && err != nil {
+		return nil, fmt.Errorf("config interval must be a valid duration: %w", err)
+	}
+	if _, err := time.ParseDuration(values["timeout"]); values["timeout"] != "" && err != nil {
+		return nil, fmt.Errorf("config timeout must be a valid duration: %w", err)
+	}
+	if _, err := time.ParseDuration(values["flush_interval"]); values["flush_interval"] != "" && err != nil {
+		return nil, fmt.Errorf("config flush_interval must be a valid duration: %w", err)
+	}
+	if _, err := strconv.Atoi(values["batch_size"]); values["batch_size"] != "" && err != nil {
+		return nil, fmt.Errorf("config batch_size must be a valid integer: %w", err)
+	}
+
+	return values, nil
+}
+
+func unquote(value string) string {
+	if len(value) >= 2 {
+		first, last := value[0], value[len(value)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+			return value[1 : len(value)-1]
+		}
+	}
+	return value
+}
+
+// resolveString picks the first non-empty of env var, config file value, or
+// built-in fallback. resolveDuration/resolveInt do the same with type parsing.
+func resolveString(envName, fileValue, fallback string) string {
+	if value := os.Getenv(envName); value != "" {
 		return value
+	}
+	if fileValue != "" {
+		return fileValue
 	}
 	return fallback
 }
 
-func envDuration(name string, fallback time.Duration) time.Duration {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
+func resolveDuration(envName, fileValue string, fallback time.Duration) time.Duration {
+	if value := os.Getenv(envName); value != "" {
+		return mustDuration(envName, value)
 	}
+	if fileValue != "" {
+		return mustDuration("config "+envName, fileValue)
+	}
+	return fallback
+}
+
+func resolveInt(envName, fileValue string, fallback int) int {
+	if value := os.Getenv(envName); value != "" {
+		return mustInt(envName, value)
+	}
+	if fileValue != "" {
+		return mustInt("config "+envName, fileValue)
+	}
+	return fallback
+}
+
+func mustDuration(source, value string) time.Duration {
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
-		log.Fatalf("%s must be a valid duration: %v", name, err)
+		log.Fatalf("%s must be a valid duration: %v", source, err)
 	}
 	return parsed
 }
 
-func envInt(name string, fallback int) int {
-	value := os.Getenv(name)
-	if value == "" {
-		return fallback
-	}
+func mustInt(source, value string) int {
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
-		log.Fatalf("%s must be a valid integer: %v", name, err)
+		log.Fatalf("%s must be a valid integer: %v", source, err)
 	}
 	return parsed
 }

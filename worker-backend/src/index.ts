@@ -15,7 +15,7 @@ import {
 } from "./security"
 import { createStorage, DuplicateUsernameError } from "./storage"
 import { SupabaseError } from "./supabase"
-import type { AlertEventRow, MetricPacket, UserRow } from "./types"
+import type { AlertEventRow, MetricPacket, RollupGranularity, UserRow } from "./types"
 
 type Variables = {
   user: AuthenticatedUser
@@ -25,6 +25,11 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 const maxTagLength = 50
 const maxTagsPerServer = 20
 const maxMetricBatchSize = 500
+// History windows: <=24h reads raw samples, <=7d reads 5-minute rollups, the
+// rest reads hourly rollups so charts stay fast once raw data is pruned.
+const rawWindowMinutes = 1440
+const fiveMinuteWindowMinutes = 10080
+const maxWindowMinutes = 525600
 const activeAlertStatus = "active"
 const resolvedAlertStatus = "resolved"
 const criticalAlertSeverity = "critical"
@@ -179,7 +184,9 @@ app.post("/api/metrics", async (context) => {
     return context.json({ title: "Unauthorized" }, 401)
   }
 
+  const newlyCreatedServers = new Set<string>()
   for (const packet of metrics.packets) {
+    const serverExisted = await storage.ownsServer(packet.serverId, ownerUserId)
     const ingested = await storage.ingestMetric(
       packet,
       context.req.header("CF-Connecting-IP") ?? null,
@@ -193,6 +200,13 @@ app.post("/api/metrics", async (context) => {
         },
         409,
       )
+    }
+
+    // Record the first sighting of a server as an "agent connected" timeline
+    // event. Deduplicate across packets in the same batch.
+    if (!serverExisted && !newlyCreatedServers.has(packet.serverId)) {
+      newlyCreatedServers.add(packet.serverId)
+      await audit(storage, ownerUserId, "agent", "server.created", "server", packet.serverId, packet.serverId, context)
     }
 
     await evaluateMetricAlerts(storage, context.env, packet, ownerUserId)
@@ -253,10 +267,14 @@ app.get("/api/servers/:serverId/metrics", requireUser, async (context) => {
 
   const requestedMinutes = Number(context.req.query("minutes") ?? 60)
   const minutes = Number.isFinite(requestedMinutes)
-    ? Math.min(1440, Math.max(1, Math.trunc(requestedMinutes)))
+    ? Math.min(maxWindowMinutes, Math.max(1, Math.trunc(requestedMinutes)))
     : 60
   const since = new Date(Date.now() - minutes * 60_000).toISOString()
-  const rows = await storage.listMetrics(serverId, since)
+  const granularity = resolutionForWindow(minutes)
+  const rows =
+    granularity === null
+      ? await storage.listMetrics(serverId, since)
+      : await storage.listMetricRollups(granularity, serverId, since)
   return context.json(
     rows.map((metric) => ({
       timestamp: metric.Timestamp,
@@ -562,6 +580,13 @@ function isPercentage(value: number | undefined): boolean {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
 }
 
+function resolutionForWindow(minutes: number): RollupGranularity | null {
+  if (minutes <= rawWindowMinutes) {
+    return null
+  }
+  return minutes <= fiveMinuteWindowMinutes ? "5m" : "1h"
+}
+
 function normalizeTag(tag: string): string | null {
   const normalized = tag.trim().toLowerCase()
   return normalized && normalized.length <= maxTagLength ? normalized : null
@@ -817,6 +842,54 @@ async function evaluateOfflineAlerts(env: Env): Promise<void> {
   }
 }
 
+interface RetentionSettings {
+  enabled: boolean
+  rawRetentionDays: number
+  fiveMinuteRetentionDays: number
+  hourRetentionDays: number
+  fiveMinuteLookbackMinutes: number
+  hourLookbackMinutes: number
+}
+
+function retentionSettings(env: Env): RetentionSettings {
+  return {
+    enabled: readEnv(env, "RETENTION_ENABLED", "true").toLowerCase() !== "false",
+    rawRetentionDays: readNumberEnv(env, "RAW_RETENTION_DAYS", 30),
+    fiveMinuteRetentionDays: readNumberEnv(env, "ROLLUP_5M_RETENTION_DAYS", 90),
+    hourRetentionDays: readNumberEnv(env, "ROLLUP_1H_RETENTION_DAYS", 365),
+    fiveMinuteLookbackMinutes: readNumberEnv(env, "ROLLUP_5M_LOOKBACK_MINUTES", 90),
+    hourLookbackMinutes: readNumberEnv(env, "ROLLUP_1H_LOOKBACK_MINUTES", 180),
+  }
+}
+
+// Rolls up recent raw samples and prunes expired history. Rollups run every few
+// minutes; pruning runs hourly because it only matters at day-scale boundaries.
+async function runHistoricalMaintenance(env: Env, scheduledTime: number): Promise<void> {
+  const settings = retentionSettings(env)
+  if (!settings.enabled) {
+    return
+  }
+
+  const storage = createStorage(env)
+  const minute = new Date(scheduledTime).getUTCMinutes()
+  const now = Date.now()
+
+  if (minute % 5 === 0) {
+    await storage.rollupMetrics(
+      new Date(now - settings.fiveMinuteLookbackMinutes * 60_000).toISOString(),
+      new Date(now - settings.hourLookbackMinutes * 60_000).toISOString(),
+    )
+  }
+
+  if (minute === 0) {
+    await storage.pruneHistory(
+      new Date(now - settings.rawRetentionDays * 86_400_000).toISOString(),
+      new Date(now - settings.fiveMinuteRetentionDays * 86_400_000).toISOString(),
+      new Date(now - settings.hourRetentionDays * 86_400_000).toISOString(),
+    )
+  }
+}
+
 async function isCpuSustained(
   storage: ReturnType<typeof createStorage>,
   packet: MetricPacket,
@@ -1054,9 +1127,24 @@ function formatPct(value: number): string {
   return Number(value.toFixed(1)).toString()
 }
 
+async function runScheduledTasks(event: ScheduledEvent, env: Env): Promise<void> {
+  const tasks: Array<Promise<void>> = [
+    evaluateOfflineAlerts(env),
+    runHistoricalMaintenance(env, event.scheduledTime),
+  ]
+  const results = await Promise.allSettled(tasks)
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.error(
+        JSON.stringify({ event: "scheduled_task_failed", error: String(result.reason) }),
+      )
+    }
+  }
+}
+
 export default {
   fetch: app.fetch,
-  scheduled(_event: ScheduledEvent, env: Env, context: ExecutionContext) {
-    context.waitUntil(evaluateOfflineAlerts(env))
+  scheduled(event: ScheduledEvent, env: Env, context: ExecutionContext) {
+    context.waitUntil(runScheduledTasks(event, env))
   },
 }

@@ -18,6 +18,10 @@
     "ALERT_DISK_THRESHOLD_PCT": "85",
     "ALERT_OFFLINE_MINUTES": "2",
     "ALERT_WEBHOOK_URLS": "",
+    "RETENTION_ENABLED": "true",
+    "RAW_RETENTION_DAYS": "30",
+    "ROLLUP_5M_RETENTION_DAYS": "90",
+    "ROLLUP_1H_RETENTION_DAYS": "365",
   },
   "triggers": {
     "crons": ["*/1 * * * *"]

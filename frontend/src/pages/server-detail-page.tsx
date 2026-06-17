@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MetricChart } from "@/components/servers/metric-chart"
+import { ServerActivity } from "@/components/servers/server-activity"
 import { AgentTokenManager } from "@/components/servers/agent-token-manager"
 import { StatusBadge } from "@/components/servers/status-badge"
 import { TagEditor } from "@/components/servers/tag-editor"
@@ -36,6 +37,8 @@ const TIME_RANGES = [
   { value: "60", label: "1h" },
   { value: "360", label: "6h" },
   { value: "1440", label: "24h" },
+  { value: "10080", label: "7d" },
+  { value: "43200", label: "30d" },
 ]
 
 export function ServerDetailPage() {
@@ -74,15 +77,17 @@ export function ServerDetailPage() {
   })
 
   const chartData = useMemo(
-    () =>
-      points.map((point) => ({
-        time: formatChartTime(point.timestamp),
+    () => {
+      const includeDate = Number(range) > 1440
+      return points.map((point) => ({
+        time: formatChartTime(point.timestamp, includeDate),
         cpu: Number(point.cpuUsagePct.toFixed(1)),
         memory: Number(((point.memoryUsedBytes / point.memoryTotalBytes) * 100).toFixed(1)),
         disk: Number(point.diskUtilizationPct.toFixed(1)),
         network: Number((point.networkInBytesSec / 1024).toFixed(1)),
-      })),
-    [points],
+      }))
+    },
+    [points, range],
   )
 
   return (
@@ -277,6 +282,8 @@ export function ServerDetailPage() {
           )}
         </>
       )}
+
+      {server && <ServerActivity serverId={serverId} />}
 
       {server && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

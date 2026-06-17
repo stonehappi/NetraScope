@@ -104,6 +104,32 @@ function buildRunCommands(
   }
 }
 
+function buildConfigToml(serverUrl: string, token: string): string {
+  return [
+    "# NetraScope agent configuration",
+    "# Save as agent.toml, then run: netrascope-agent -config agent.toml",
+    `server_url = "${serverUrl}"`,
+    `token = "${token}"`,
+    "",
+    "# Optional overrides (uncomment to change the defaults):",
+    '# server_id = "web-01"',
+    '# interval = "10s"',
+    '# timeout = "5s"',
+    "# batch_size = 6",
+    '# flush_interval = "60s"',
+    "",
+  ].join("\n")
+}
+
+function downloadTextFile(fileName: string, contents: string): void {
+  const url = URL.createObjectURL(new Blob([contents], { type: "text/plain" }))
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = fileName
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 export function AgentSetupGuide() {
   const meQuery = useQuery({
     queryKey: ["me"],
@@ -134,6 +160,10 @@ export function AgentSetupGuide() {
           activeDownload.url,
         )
       : null
+
+  const configToml = meQuery.data
+    ? buildConfigToml(`${API_BASE_URL}/api/metrics`, meQuery.data.ingestionToken)
+    : null
 
   return (
     <div className="space-y-4">
@@ -203,6 +233,30 @@ export function AgentSetupGuide() {
           {activeTab === "windows"
             ? "Registers and starts a Windows service that launches the agent automatically on every boot."
             : "Registers and starts a systemd (Linux) or launchd (macOS) service that launches the agent automatically on every boot."}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-medium">Or use a config file</p>
+          {configToml && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => downloadTextFile("agent.toml", configToml)}
+            >
+              <Download className="size-4" />
+              Download agent.toml
+            </Button>
+          )}
+        </div>
+        {meQuery.isLoading && <Skeleton className="h-32 w-full" />}
+        {configToml && <CommandBlock command={configToml} />}
+        <p className="text-xs text-muted-foreground">
+          Keep settings in one file instead of passing every flag. Run with{" "}
+          <code className="font-mono">netrascope-agent -config agent.toml</code> (add{" "}
+          <code className="font-mono">-service install</code> to run it as a boot service).
+          Flags and environment variables still override values from the file.
         </p>
       </div>
 
