@@ -70,11 +70,11 @@ Useful UI features:
 - Timeline events for agent install, offline, recovery, token changes, and deletion.
 - Better onboarding and empty states.
 
-## 5. Agent Configuration Profiles
+## 5. Agent Configuration Profiles ✅ Implemented
 
-Let the dashboard generate a config file instead of requiring every flag manually.
-
-Example config:
+The agent reads a TOML config file via `-config` (or `NETRASCOPE_CONFIG`), and
+the dashboard **Add server** guide generates one prefilled with the server URL
+and token ("Download agent.toml").
 
 ```toml
 server_url = "https://api.example.com/api/metrics"
@@ -83,11 +83,13 @@ interval = "10s"
 server_id = "web-01"
 ```
 
-Example install command:
-
 ```bash
 netrascope-agent -config /etc/netrascope/agent.toml
 ```
+
+Precedence is flag > environment variable > config file > built-in default, so a
+shared base file can be tweaked per host. Unknown keys and invalid values fail
+fast. See [agent/docs/USAGE.md](agent/docs/USAGE.md) "Config file".
 
 ## 6. Security Hardening
 
@@ -99,25 +101,36 @@ Recommended upgrades:
 - Rate limits on auth and metric ingestion endpoints.
 - Optional IP allowlist per token.
 
-## 7. Historical Storage Strategy
+## 7. Historical Storage Strategy ✅ Implemented
 
-Metrics can grow quickly. Add retention and rollups.
+Metrics can grow quickly, so both backends now roll raw samples into
+downsampled aggregates and prune data past its retention window.
 
-Suggested policy:
+Active policy (configurable via environment variables):
 
-- Raw metrics: 7 or 30 days.
-- 5-minute rollups: 90 days.
-- Hourly rollups: 1 year.
+- Raw metrics: 30 days (`RAW_RETENTION_DAYS`).
+- 5-minute rollups: 90 days (`ROLLUP_5M_RETENTION_DAYS`).
+- Hourly rollups: 1 year (`ROLLUP_1H_RETENTION_DAYS`).
 
-This keeps storage cost under control and makes charts faster.
+A scheduled job recomputes rollups (every 5 minutes) and prunes expired data
+(hourly). The history endpoint auto-selects resolution by requested window —
+raw up to 24h, 5-minute rollups up to 7d, hourly rollups up to 365d — so charts
+stay fast and keep working after raw data is pruned. The dashboard exposes new
+7d and 30d ranges.
 
-## 8. Public Deployment Path
+Implemented across the .NET backend (`metric_rollups` table +
+`MetricMaintenanceWorker`), the Cloudflare Worker (D1 and Supabase storage +
+scheduled trigger), and the frontend.
 
-Create one recommended production deployment path.
+## 8. Public Deployment Path ✅ Implemented
 
-Suggested stack:
+One recommended production deployment path is documented end to end in
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
-- Frontend on Cloudflare Pages.
-- Backend on Cloudflare Workers plus D1 or Supabase.
-- Agent binaries on GitHub Releases.
-- One clear production setup guide.
+Stack:
+
+- Frontend on Cloudflare Pages (SPA fallback via `frontend/public/_redirects`).
+- Backend on Cloudflare Workers plus D1 (Supabase remains an option).
+- Agent binaries on GitHub Releases (tag-triggered `agent-release.yml`).
+- A single production setup guide covering backend, dashboard, agent releases,
+  first-account lockdown, and verification.

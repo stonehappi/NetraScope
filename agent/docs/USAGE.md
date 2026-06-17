@@ -131,11 +131,13 @@ On Windows, stop the service before updating:
 
 ## Configuration reference
 
-Every setting can be passed as a command-line flag or an environment
-variable. Flags take priority if both are set.
+Every setting can be passed as a command-line flag, an environment variable, or
+a config file. Precedence, highest first: **flag > environment variable > config
+file > built-in default**.
 
 | Flag | Environment variable | Default | Description |
 | --- | --- | --- | --- |
+| `-config` | `NETRASCOPE_CONFIG` | empty | Path to a TOML config file (see below). |
 | `-server-url` | `NETRASCOPE_SERVER_URL` | `http://localhost:5050/api/metrics` | Where metrics are sent. Use HTTPS in production. |
 | `-server-id` | `NETRASCOPE_SERVER_ID` | machine hostname | Name shown for this server in the dashboard. |
 | `-token` | `NETRASCOPE_TOKEN` | empty | Bearer token sent with each request, if your backend requires auth. Never logged. |
@@ -151,6 +153,35 @@ variable. Flags take priority if both are set.
 The default `-interval 10s`, `-batch-size 6`, and `-flush-interval 60s`
 combination keeps 10-second metric resolution but reduces API requests to
 about one upload per minute per server.
+
+### Config file
+
+Instead of passing every flag, point the agent at a TOML file. The dashboard
+**Add server** guide generates one prefilled with your server URL and token
+("Download agent.toml").
+
+```toml
+# /etc/netrascope/agent.toml
+server_url = "https://monitor.example.com/api/metrics"
+token = "YOUR_TOKEN"
+server_id = "web-01"
+interval = "10s"
+timeout = "5s"
+batch_size = 6
+flush_interval = "60s"
+```
+
+```sh
+netrascope-agent -config /etc/netrascope/agent.toml
+# or install it as a boot service:
+sudo netrascope-agent -service install -config /etc/netrascope/agent.toml
+```
+
+Keys use `snake_case` and map one-to-one to the flags above. Only `server_url`
+and `token` are typically required; omit any key to keep its default. Unknown
+keys or invalid values fail fast with an error. Flags and environment variables
+still override file values, so you can keep a shared base file and tweak a
+single setting per host.
 
 ### Examples
 
