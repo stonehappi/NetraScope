@@ -55,8 +55,12 @@ export function getServerStatus(lastHeartbeatAt: string): ServerStatus {
   return "offline"
 }
 
-export function formatChartTime(isoTimestamp: string): string {
-  return new Date(isoTimestamp).toLocaleTimeString([], {
+export function formatChartTime(isoTimestamp: string, includeDate = false): string {
+  const date = new Date(isoTimestamp)
+  if (includeDate) {
+    return date.toLocaleDateString([], { month: "short", day: "numeric" })
+  }
+  return date.toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
   })

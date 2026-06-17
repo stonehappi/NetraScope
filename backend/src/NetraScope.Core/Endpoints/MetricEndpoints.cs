@@ -7,6 +7,7 @@ using NetraScope.Core.Auth;
 using NetraScope.Core.Contracts;
 using NetraScope.Core.Data;
 using NetraScope.Core.Entities;
+using NetraScope.Core.Metrics;
 using NetraScope.Shared;
 
 namespace NetraScope.Core.Endpoints;
@@ -14,7 +15,6 @@ namespace NetraScope.Core.Endpoints;
 public static class MetricEndpoints
 {
     private const int DefaultHistoryMinutes = 60;
-    private const int MaxHistoryMinutes = 1440;
     private const int MaxBatchSize = 500;
 
     public static IEndpointRouteBuilder MapMetricEndpoints(this IEndpointRouteBuilder endpoints)
@@ -55,21 +55,39 @@ public static class MetricEndpoints
             return Results.NotFound();
         }
 
-        var window = Math.Clamp(minutes ?? DefaultHistoryMinutes, 1, MaxHistoryMinutes);
+        var window = Math.Clamp(minutes ?? DefaultHistoryMinutes, 1, MetricResolution.MaxWindowMinutes);
         var since = DateTimeOffset.UtcNow.AddMinutes(-window);
+        var granularity = MetricResolution.GranularityForWindow(window);
 
-        var points = await db.PerformanceMetrics
-            .AsNoTracking()
-            .Where(metric => metric.ServerId == serverId && metric.Timestamp >= since)
-            .OrderBy(metric => metric.Timestamp)
-            .Select(metric => new MetricPoint(
-                metric.Timestamp,
-                metric.CpuUsagePct,
-                metric.MemoryUsedBytes,
-                metric.MemoryTotalBytes,
-                metric.DiskUtilizationPct,
-                metric.NetworkInBytesSec))
-            .ToArrayAsync(cancellationToken);
+        // Short windows read raw samples; longer windows read downsampled rollups
+        // so charts stay fast and pruned raw data does not leave gaps.
+        var points = granularity is null
+            ? await db.PerformanceMetrics
+                .AsNoTracking()
+                .Where(metric => metric.ServerId == serverId && metric.Timestamp >= since)
+                .OrderBy(metric => metric.Timestamp)
+                .Select(metric => new MetricPoint(
+                    metric.Timestamp,
+                    metric.CpuUsagePct,
+                    metric.MemoryUsedBytes,
+                    metric.MemoryTotalBytes,
+                    metric.DiskUtilizationPct,
+                    metric.NetworkInBytesSec))
+                .ToArrayAsync(cancellationToken)
+            : await db.MetricRollups
+                .AsNoTracking()
+                .Where(rollup => rollup.ServerId == serverId
+                    && rollup.Granularity == granularity
+                    && rollup.BucketStart >= since)
+                .OrderBy(rollup => rollup.BucketStart)
+                .Select(rollup => new MetricPoint(
+                    rollup.BucketStart,
+                    rollup.CpuAvgPct,
+                    rollup.MemoryUsedAvgBytes,
+                    rollup.MemoryTotalMaxBytes,
+                    rollup.DiskAvgPct,
+                    rollup.NetworkInAvgBytesSec))
+                .ToArrayAsync(cancellationToken);
 
         return Results.Ok(points);
     }

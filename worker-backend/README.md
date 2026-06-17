@@ -177,6 +177,31 @@ wrangler secret put ALERT_TELEGRAM_BOT_TOKEN
 wrangler secret put ALERT_TELEGRAM_CHAT_ID
 ```
 
+## History retention and rollups
+
+The same scheduled trigger rolls raw metrics into 5-minute and hourly aggregates
+and prunes data past its retention window, keeping storage bounded as history
+grows. Rollups run every 5 minutes; pruning runs hourly.
+
+The history endpoint picks resolution automatically from the requested window:
+windows up to 24h read raw samples, up to 7d read 5-minute rollups, and longer
+windows (up to 365d) read hourly rollups. Responses keep the same shape, so the
+dashboard charts work unchanged.
+
+Defaults follow the storage strategy and can be tuned with Worker variables:
+
+```text
+RETENTION_ENABLED=true
+RAW_RETENTION_DAYS=30
+ROLLUP_5M_RETENTION_DAYS=90
+ROLLUP_1H_RETENTION_DAYS=365
+```
+
+The D1 schema adds `metric_rollups` via `migrations/0004_metric_rollups.sql`
+(applied by `wrangler d1 migrations apply`). For Supabase, re-run
+`supabase/schema.sql` to create the `metric_rollups` table and the
+`netrascope_rollup_metrics` / `netrascope_prune_history` functions.
+
 ## Security hardening
 
 The Worker supports the same server-scoped token and audit APIs as the .NET
@@ -205,8 +230,8 @@ assignments. Stop the agent first or its next metric will recreate the server.
 
 D1 removes the external database request and Supabase credentials. It is a
 good default for a small or medium monitoring deployment. At the agent's
-default 10-second interval, each server writes 8,640 metric rows per day, so
-plan retention or aggregation before history grows indefinitely.
+default 10-second interval, each server writes 8,640 metric rows per day; the
+retention and rollup jobs above keep that growth bounded.
 
 Supabase is preferable when you need PostgreSQL tooling, direct SQL access,
 larger analytical workflows, or integration with other Supabase services.

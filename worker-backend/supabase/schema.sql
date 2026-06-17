@@ -35,6 +35,27 @@ create table if not exists public.performance_metrics (
 create index if not exists "IX_performance_metrics_ServerId_Timestamp"
   on public.performance_metrics ("ServerId", "Timestamp" desc);
 
+create table if not exists public.metric_rollups (
+  "ServerId" varchar(200) not null
+    references public.servers ("Id") on delete cascade,
+  "Granularity" varchar(10) not null,
+  "BucketStart" timestamptz not null,
+  "CpuAvg" real not null,
+  "CpuMax" real not null,
+  "MemoryUsedAvg" bigint not null,
+  "MemoryUsedMax" bigint not null,
+  "MemoryTotalMax" bigint not null,
+  "DiskAvg" real not null,
+  "DiskMax" real not null,
+  "NetworkInAvg" bigint not null,
+  "NetworkInMax" bigint not null,
+  "SampleCount" integer not null,
+  primary key ("ServerId", "Granularity", "BucketStart")
+);
+
+create index if not exists "IX_metric_rollups_Granularity_BucketStart"
+  on public.metric_rollups ("Granularity", "BucketStart");
+
 create table if not exists public.tags (
   "Name" varchar(50) primary key
 );
@@ -206,9 +227,102 @@ begin
 end;
 $$;
 
+-- Recomputes 5-minute and hourly rollups for every bucket touched since the
+-- given cutoffs, upserting so late-arriving samples fold in without duplicates.
+create or replace function public.netrascope_rollup_metrics(
+  p_five_minute_since timestamptz,
+  p_hour_since timestamptz
+)
+returns void
+language plpgsql
+set search_path = ''
+as $$
+begin
+  insert into public.metric_rollups (
+    "ServerId", "Granularity", "BucketStart", "CpuAvg", "CpuMax", "MemoryUsedAvg",
+    "MemoryUsedMax", "MemoryTotalMax", "DiskAvg", "DiskMax", "NetworkInAvg",
+    "NetworkInMax", "SampleCount"
+  )
+  select
+    "ServerId",
+    '5m',
+    to_timestamp(floor(extract(epoch from "Timestamp") / 300) * 300),
+    avg("CpuUsagePct"), max("CpuUsagePct"),
+    avg("MemoryUsedBytes")::bigint, max("MemoryUsedBytes"),
+    max("MemoryTotalBytes"),
+    avg("DiskUtilizationPct"), max("DiskUtilizationPct"),
+    avg("NetworkInBytesSec")::bigint, max("NetworkInBytesSec"),
+    count(*)
+  from public.performance_metrics
+  where "Timestamp" >= p_five_minute_since
+  group by "ServerId", floor(extract(epoch from "Timestamp") / 300) * 300
+  on conflict ("ServerId", "Granularity", "BucketStart") do update set
+    "CpuAvg" = excluded."CpuAvg",
+    "CpuMax" = excluded."CpuMax",
+    "MemoryUsedAvg" = excluded."MemoryUsedAvg",
+    "MemoryUsedMax" = excluded."MemoryUsedMax",
+    "MemoryTotalMax" = excluded."MemoryTotalMax",
+    "DiskAvg" = excluded."DiskAvg",
+    "DiskMax" = excluded."DiskMax",
+    "NetworkInAvg" = excluded."NetworkInAvg",
+    "NetworkInMax" = excluded."NetworkInMax",
+    "SampleCount" = excluded."SampleCount";
+
+  insert into public.metric_rollups (
+    "ServerId", "Granularity", "BucketStart", "CpuAvg", "CpuMax", "MemoryUsedAvg",
+    "MemoryUsedMax", "MemoryTotalMax", "DiskAvg", "DiskMax", "NetworkInAvg",
+    "NetworkInMax", "SampleCount"
+  )
+  select
+    "ServerId",
+    '1h',
+    to_timestamp(floor(extract(epoch from "Timestamp") / 3600) * 3600),
+    avg("CpuUsagePct"), max("CpuUsagePct"),
+    avg("MemoryUsedBytes")::bigint, max("MemoryUsedBytes"),
+    max("MemoryTotalBytes"),
+    avg("DiskUtilizationPct"), max("DiskUtilizationPct"),
+    avg("NetworkInBytesSec")::bigint, max("NetworkInBytesSec"),
+    count(*)
+  from public.performance_metrics
+  where "Timestamp" >= p_hour_since
+  group by "ServerId", floor(extract(epoch from "Timestamp") / 3600) * 3600
+  on conflict ("ServerId", "Granularity", "BucketStart") do update set
+    "CpuAvg" = excluded."CpuAvg",
+    "CpuMax" = excluded."CpuMax",
+    "MemoryUsedAvg" = excluded."MemoryUsedAvg",
+    "MemoryUsedMax" = excluded."MemoryUsedMax",
+    "MemoryTotalMax" = excluded."MemoryTotalMax",
+    "DiskAvg" = excluded."DiskAvg",
+    "DiskMax" = excluded."DiskMax",
+    "NetworkInAvg" = excluded."NetworkInAvg",
+    "NetworkInMax" = excluded."NetworkInMax",
+    "SampleCount" = excluded."SampleCount";
+end;
+$$;
+
+-- Deletes raw samples and rollups older than their retention windows.
+create or replace function public.netrascope_prune_history(
+  p_raw_cutoff timestamptz,
+  p_five_minute_cutoff timestamptz,
+  p_hour_cutoff timestamptz
+)
+returns void
+language plpgsql
+set search_path = ''
+as $$
+begin
+  delete from public.performance_metrics where "Timestamp" < p_raw_cutoff;
+  delete from public.metric_rollups
+    where "Granularity" = '5m' and "BucketStart" < p_five_minute_cutoff;
+  delete from public.metric_rollups
+    where "Granularity" = '1h' and "BucketStart" < p_hour_cutoff;
+end;
+$$;
+
 alter table public.users enable row level security;
 alter table public.servers enable row level security;
 alter table public.performance_metrics enable row level security;
+alter table public.metric_rollups enable row level security;
 alter table public.tags enable row level security;
 alter table public.server_tags enable row level security;
 alter table public.alert_events enable row level security;
@@ -218,6 +332,7 @@ alter table public.audit_logs enable row level security;
 revoke all on table public.users from anon, authenticated;
 revoke all on table public.servers from anon, authenticated;
 revoke all on table public.performance_metrics from anon, authenticated;
+revoke all on table public.metric_rollups from anon, authenticated;
 revoke all on table public.tags from anon, authenticated;
 revoke all on table public.server_tags from anon, authenticated;
 revoke all on table public.alert_events from anon, authenticated;
@@ -229,11 +344,18 @@ revoke execute on function public.netrascope_ingest_metric(
 revoke execute on function public.netrascope_replace_server_tags(
   text, uuid, text[]
 ) from public, anon, authenticated;
+revoke execute on function public.netrascope_rollup_metrics(
+  timestamptz, timestamptz
+) from public, anon, authenticated;
+revoke execute on function public.netrascope_prune_history(
+  timestamptz, timestamptz, timestamptz
+) from public, anon, authenticated;
 
 grant usage on schema public to service_role;
 grant all on table public.users to service_role;
 grant all on table public.servers to service_role;
 grant all on table public.performance_metrics to service_role;
+grant all on table public.metric_rollups to service_role;
 grant all on table public.tags to service_role;
 grant all on table public.server_tags to service_role;
 grant all on table public.alert_events to service_role;
@@ -245,4 +367,10 @@ grant execute on function public.netrascope_ingest_metric(
 ) to service_role;
 grant execute on function public.netrascope_replace_server_tags(
   text, uuid, text[]
+) to service_role;
+grant execute on function public.netrascope_rollup_metrics(
+  timestamptz, timestamptz
+) to service_role;
+grant execute on function public.netrascope_prune_history(
+  timestamptz, timestamptz, timestamptz
 ) to service_role;

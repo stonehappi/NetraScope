@@ -10,6 +10,8 @@ public sealed class NetraDbContext(DbContextOptions<NetraDbContext> options)
 
     public DbSet<PerformanceMetric> PerformanceMetrics => Set<PerformanceMetric>();
 
+    public DbSet<MetricRollup> MetricRollups => Set<MetricRollup>();
+
     public DbSet<Tag> Tags => Set<Tag>();
 
     public DbSet<ServerTag> ServerTags => Set<ServerTag>();
@@ -58,6 +60,23 @@ public sealed class NetraDbContext(DbContextOptions<NetraDbContext> options)
                 .HasOne(metric => metric.Server)
                 .WithMany(server => server.Metrics)
                 .HasForeignKey(metric => metric.ServerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MetricRollup>(entity =>
+        {
+            entity.ToTable("metric_rollups");
+            entity.HasKey(rollup => new { rollup.ServerId, rollup.Granularity, rollup.BucketStart });
+            entity.Property(rollup => rollup.ServerId).HasMaxLength(200).IsRequired();
+            entity.Property(rollup => rollup.Granularity).HasMaxLength(10).IsRequired();
+            entity.Property(rollup => rollup.BucketStart).IsRequired();
+
+            entity.HasIndex(rollup => new { rollup.Granularity, rollup.BucketStart });
+
+            entity
+                .HasOne(rollup => rollup.Server)
+                .WithMany(server => server.MetricRollups)
+                .HasForeignKey(rollup => rollup.ServerId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

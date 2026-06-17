@@ -5,9 +5,12 @@ import type {
   AuditLogRow,
   MetricPacket,
   MetricRow,
+  RollupGranularity,
   ServerRow,
   UserRow,
 } from "../types"
+
+const bucketSeconds: Record<RollupGranularity, number> = { "5m": 300, "1h": 3600 }
 
 interface D1ServerRow {
   Id: string
@@ -185,6 +188,94 @@ export class D1Storage implements Storage {
       .bind(serverId, since)
       .all<MetricRow>()
     return rows.results
+  }
+
+  async listMetricRollups(
+    granularity: RollupGranularity,
+    serverId: string,
+    since: string,
+  ): Promise<MetricRow[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT
+           BucketStart AS Timestamp,
+           CpuAvg AS CpuUsagePct,
+           MemoryUsedAvg AS MemoryUsedBytes,
+           MemoryTotalMax AS MemoryTotalBytes,
+           DiskAvg AS DiskUtilizationPct,
+           NetworkInAvg AS NetworkInBytesSec
+         FROM metric_rollups
+         WHERE ServerId = ?1 AND Granularity = ?2 AND BucketStart >= ?3
+         ORDER BY BucketStart`,
+      )
+      .bind(serverId, granularity, since)
+      .all<MetricRow>()
+    return rows.results
+  }
+
+  async rollupMetrics(fiveMinuteSince: string, hourSince: string): Promise<void> {
+    await this.db.batch([
+      this.rollupStatement("5m", fiveMinuteSince),
+      this.rollupStatement("1h", hourSince),
+    ])
+  }
+
+  async pruneHistory(
+    rawCutoff: string,
+    fiveMinuteCutoff: string,
+    hourCutoff: string,
+  ): Promise<void> {
+    await this.db.batch([
+      this.db
+        .prepare("DELETE FROM performance_metrics WHERE Timestamp < ?1")
+        .bind(rawCutoff),
+      this.db
+        .prepare("DELETE FROM metric_rollups WHERE Granularity = '5m' AND BucketStart < ?1")
+        .bind(fiveMinuteCutoff),
+      this.db
+        .prepare("DELETE FROM metric_rollups WHERE Granularity = '1h' AND BucketStart < ?1")
+        .bind(hourCutoff),
+    ])
+  }
+
+  // Recomputes rollups for every bucket touched since the cutoff and upserts
+  // them, so late-arriving samples are folded in without duplicating buckets.
+  private rollupStatement(granularity: RollupGranularity, since: string): D1PreparedStatement {
+    const seconds = bucketSeconds[granularity]
+    const bucketExpr = `(unixepoch(Timestamp) / ${seconds}) * ${seconds}`
+    return this.db
+      .prepare(
+        `INSERT INTO metric_rollups (
+           ServerId, Granularity, BucketStart, CpuAvg, CpuMax, MemoryUsedAvg,
+           MemoryUsedMax, MemoryTotalMax, DiskAvg, DiskMax, NetworkInAvg,
+           NetworkInMax, SampleCount
+         )
+         SELECT
+           ServerId,
+           ?2,
+           strftime('%Y-%m-%dT%H:%M:%SZ', ${bucketExpr}, 'unixepoch'),
+           avg(CpuUsagePct), max(CpuUsagePct),
+           cast(avg(MemoryUsedBytes) AS INTEGER), max(MemoryUsedBytes),
+           max(MemoryTotalBytes),
+           avg(DiskUtilizationPct), max(DiskUtilizationPct),
+           cast(avg(NetworkInBytesSec) AS INTEGER), max(NetworkInBytesSec),
+           count(*)
+         FROM performance_metrics
+         WHERE Timestamp >= ?1
+         GROUP BY ServerId, ${bucketExpr}
+         ON CONFLICT (ServerId, Granularity, BucketStart) DO UPDATE SET
+           CpuAvg = excluded.CpuAvg,
+           CpuMax = excluded.CpuMax,
+           MemoryUsedAvg = excluded.MemoryUsedAvg,
+           MemoryUsedMax = excluded.MemoryUsedMax,
+           MemoryTotalMax = excluded.MemoryTotalMax,
+           DiskAvg = excluded.DiskAvg,
+           DiskMax = excluded.DiskMax,
+           NetworkInAvg = excluded.NetworkInAvg,
+           NetworkInMax = excluded.NetworkInMax,
+           SampleCount = excluded.SampleCount`,
+      )
+      .bind(since, granularity)
   }
 
   async getServerWithTags(

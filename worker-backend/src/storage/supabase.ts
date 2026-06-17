@@ -6,6 +6,7 @@ import type {
   AuditLogRow,
   MetricPacket,
   MetricRow,
+  RollupGranularity,
   ServerRow,
   UserRow,
 } from "../types"
@@ -127,6 +128,46 @@ export class SupabaseStorage implements Storage {
         "?select=Timestamp,CpuUsagePct,MemoryUsedBytes,MemoryTotalBytes,DiskUtilizationPct,NetworkInBytesSec" +
         `&ServerId=${eq(serverId)}&Timestamp=gte.${encodeURIComponent(since)}&order=Timestamp.asc`,
     )
+  }
+
+  async listMetricRollups(
+    granularity: RollupGranularity,
+    serverId: string,
+    since: string,
+  ): Promise<MetricRow[]> {
+    return supabaseRequest<MetricRow[]>(
+      this.env,
+      "metric_rollups" +
+        "?select=Timestamp:BucketStart,CpuUsagePct:CpuAvg,MemoryUsedBytes:MemoryUsedAvg," +
+        "MemoryTotalBytes:MemoryTotalMax,DiskUtilizationPct:DiskAvg,NetworkInBytesSec:NetworkInAvg" +
+        `&ServerId=${eq(serverId)}&Granularity=${eq(granularity)}` +
+        `&BucketStart=gte.${encodeURIComponent(since)}&order=BucketStart.asc`,
+    )
+  }
+
+  async rollupMetrics(fiveMinuteSince: string, hourSince: string): Promise<void> {
+    await supabaseRequest<void>(this.env, "rpc/netrascope_rollup_metrics", {
+      method: "POST",
+      body: JSON.stringify({
+        p_five_minute_since: fiveMinuteSince,
+        p_hour_since: hourSince,
+      }),
+    })
+  }
+
+  async pruneHistory(
+    rawCutoff: string,
+    fiveMinuteCutoff: string,
+    hourCutoff: string,
+  ): Promise<void> {
+    await supabaseRequest<void>(this.env, "rpc/netrascope_prune_history", {
+      method: "POST",
+      body: JSON.stringify({
+        p_raw_cutoff: rawCutoff,
+        p_five_minute_cutoff: fiveMinuteCutoff,
+        p_hour_cutoff: hourCutoff,
+      }),
+    })
   }
 
   async getServerWithTags(

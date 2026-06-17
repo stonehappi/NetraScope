@@ -6,6 +6,7 @@ import type {
   AuditLogRow,
   MetricPacket,
   MetricRow,
+  RollupGranularity,
   ServerRow,
   UserRow,
 } from "./types"
@@ -26,6 +27,17 @@ export interface Storage {
   ownsServer(serverId: string, ownerUserId: string): Promise<boolean>
   deleteServer(serverId: string, ownerUserId: string): Promise<boolean>
   listMetrics(serverId: string, since: string): Promise<MetricRow[]>
+  listMetricRollups(
+    granularity: RollupGranularity,
+    serverId: string,
+    since: string,
+  ): Promise<MetricRow[]>
+  rollupMetrics(fiveMinuteSince: string, hourSince: string): Promise<void>
+  pruneHistory(
+    rawCutoff: string,
+    fiveMinuteCutoff: string,
+    hourCutoff: string,
+  ): Promise<void>
   getServerWithTags(serverId: string, ownerUserId: string): Promise<ServerRow | null>
   replaceServerTags(
     serverId: string,
