@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using NetraScope.Core.Alerting;
 using NetraScope.Core.Auth;
 using NetraScope.Core.Data;
 using NetraScope.Core.Endpoints;
@@ -17,6 +18,12 @@ var connectionString = builder.Configuration.GetConnectionString("NetraScope")
 builder.Services.AddDbContextPool<NetraDbContext>(options =>
     options.UseNpgsql(connectionString));
 builder.Services.AddOpenApi();
+builder.Services.Configure<AlertingOptions>(
+    builder.Configuration.GetSection(AlertingOptions.SectionName));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddHttpClient<IAlertNotifier, WebhookAlertNotifier>();
+builder.Services.AddScoped<IAlertingService, AlertingService>();
+builder.Services.AddHostedService<OfflineAlertWorker>();
 
 var jwtSection = builder.Configuration.GetSection(JwtOptions.SectionName);
 builder.Services.Configure<JwtOptions>(jwtSection);
@@ -50,6 +57,8 @@ builder.Services.AddAuthorization();
 // forcing and account-spam. Tune limits via Auth:RateLimit configuration.
 var authPermitLimit = builder.Configuration.GetValue("Auth:RateLimit:PermitLimit", 10);
 var authWindowSeconds = builder.Configuration.GetValue("Auth:RateLimit:WindowSeconds", 60);
+var metricsPermitLimit = builder.Configuration.GetValue("Metrics:RateLimit:PermitLimit", 600);
+var metricsWindowSeconds = builder.Configuration.GetValue("Metrics:RateLimit:WindowSeconds", 60);
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -60,6 +69,15 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = authPermitLimit,
                 Window = TimeSpan.FromSeconds(authWindowSeconds),
+                QueueLimit = 0,
+            }));
+    options.AddPolicy(RateLimitPolicies.Metrics, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = metricsPermitLimit,
+                Window = TimeSpan.FromSeconds(metricsWindowSeconds),
                 QueueLimit = 0,
             }));
 });
@@ -101,6 +119,8 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapAuthEndpoints();
 app.MapMetricEndpoints();
 app.MapServerEndpoints();
+app.MapAlertEndpoints();
+app.MapSecurityEndpoints();
 
 app.Run();
 

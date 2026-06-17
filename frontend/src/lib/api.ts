@@ -1,4 +1,8 @@
 import type {
+  AgentTokenCreatedResponse,
+  AgentTokenResponse,
+  AlertResponse,
+  AuditLogResponse,
   AuthResponse,
   LoginRequest,
   MeResponse,
@@ -8,6 +12,7 @@ import type {
   ReplaceServerTagsRequest,
   ServerSummary,
   ServerTagsResponse,
+  UpsertAgentTokenRequest,
 } from "@/types/api"
 import { getStoredToken, notifyUnauthorized } from "@/lib/auth"
 
@@ -73,6 +78,11 @@ export function getServerMetrics(serverId: string, minutes: number): Promise<Met
   )
 }
 
+export function getAlerts(status?: "active" | "resolved"): Promise<AlertResponse[]> {
+  const query = status ? `?status=${status}` : ""
+  return request<AlertResponse[]>(`/api/alerts${query}`)
+}
+
 export function deleteServer(serverId: string): Promise<void> {
   return request<void>(`/api/servers/${encodeURIComponent(serverId)}`, {
     method: "DELETE",
@@ -91,6 +101,58 @@ export function replaceServerTags(
     method: "PUT",
     body: JSON.stringify(body),
   })
+}
+
+export function getAgentTokens(serverId: string): Promise<AgentTokenResponse[]> {
+  return request<AgentTokenResponse[]>(`/api/servers/${encodeURIComponent(serverId)}/tokens`)
+}
+
+export function createAgentToken(
+  serverId: string,
+  body: UpsertAgentTokenRequest,
+): Promise<AgentTokenCreatedResponse> {
+  return request<AgentTokenCreatedResponse>(`/api/servers/${encodeURIComponent(serverId)}/tokens`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function updateAgentToken(
+  serverId: string,
+  tokenId: string,
+  body: UpsertAgentTokenRequest,
+): Promise<AgentTokenResponse> {
+  return request<AgentTokenResponse>(
+    `/api/servers/${encodeURIComponent(serverId)}/tokens/${encodeURIComponent(tokenId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(body),
+    },
+  )
+}
+
+export function rotateAgentToken(
+  serverId: string,
+  tokenId: string,
+): Promise<AgentTokenCreatedResponse> {
+  return request<AgentTokenCreatedResponse>(
+    `/api/servers/${encodeURIComponent(serverId)}/tokens/${encodeURIComponent(tokenId)}/rotate`,
+    { method: "POST" },
+  )
+}
+
+export function revokeAgentToken(
+  serverId: string,
+  tokenId: string,
+): Promise<AgentTokenResponse> {
+  return request<AgentTokenResponse>(
+    `/api/servers/${encodeURIComponent(serverId)}/tokens/${encodeURIComponent(tokenId)}`,
+    { method: "DELETE" },
+  )
+}
+
+export function getAuditLogs(): Promise<AuditLogResponse[]> {
+  return request<AuditLogResponse[]>("/api/audit-logs")
 }
 
 export function login(body: LoginRequest): Promise<AuthResponse> {

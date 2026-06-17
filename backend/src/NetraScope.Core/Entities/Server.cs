@@ -17,4 +17,8 @@ public sealed class Server
     public ICollection<PerformanceMetric> Metrics { get; } = [];
 
     public ICollection<ServerTag> ServerTags { get; } = [];
+
+    public ICollection<AlertEvent> AlertEvents { get; } = [];
+
+    public ICollection<AgentToken> AgentTokens { get; } = [];
 }

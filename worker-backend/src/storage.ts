@@ -1,6 +1,14 @@
 import { D1Storage } from "./storage/d1"
 import { SupabaseStorage } from "./storage/supabase"
-import type { MetricPacket, MetricRow, ServerRow, UserRow } from "./types"
+import type {
+  AgentTokenRow,
+  AlertEventRow,
+  AuditLogRow,
+  MetricPacket,
+  MetricRow,
+  ServerRow,
+  UserRow,
+} from "./types"
 
 export interface Storage {
   findUserByUsername(username: string): Promise<UserRow | null>
@@ -24,6 +32,22 @@ export interface Storage {
     ownerUserId: string,
     tags: string[],
   ): Promise<boolean>
+  listAlerts(ownerUserId: string, status: string | null): Promise<AlertEventRow[]>
+  findActiveAlert(
+    serverId: string,
+    ownerUserId: string,
+    ruleKey: string,
+  ): Promise<AlertEventRow | null>
+  createAlert(alert: Omit<AlertEventRow, "Id" | "LastNotifiedAt">): Promise<AlertEventRow>
+  updateAlert(alert: AlertEventRow): Promise<void>
+  listOfflineServers(cutoff: string): Promise<ServerRow[]>
+  findAgentTokenByHash(tokenHash: string): Promise<AgentTokenRow | null>
+  listAgentTokens(serverId: string, ownerUserId: string): Promise<AgentTokenRow[]>
+  createAgentToken(token: AgentTokenRow): Promise<void>
+  updateAgentToken(token: AgentTokenRow): Promise<void>
+  updateAgentTokenLastUsed(tokenId: string, lastUsedAt: string): Promise<void>
+  listAuditLogs(ownerUserId: string): Promise<AuditLogRow[]>
+  createAuditLog(log: Omit<AuditLogRow, "Id">): Promise<void>
 }
 
 export class DuplicateUsernameError extends Error {}

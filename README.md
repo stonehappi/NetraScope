@@ -28,15 +28,29 @@ server details, or other sensitive information.
 ## Features
 
 - Live fleet dashboard with online, stale, and offline status.
+- Dashboard sorting and filtering by status, tag, hostname, CPU, memory, disk,
+  and heartbeat recency.
+- Environment grouping from tags such as production, staging, development, and
+  QA.
 - CPU, memory, disk, and inbound network monitoring.
 - Historical charts for 15-minute, 1-hour, 6-hour, and 24-hour windows.
 - Search, server tags, and tag-based filtering.
 - Owner-only server deletion with confirmation and metric-history cleanup.
 - Per-user dashboards protected by JWT authentication.
 - Per-user ingestion tokens for isolating agent data.
+- Per-server agent tokens with rotation, revocation, hashed storage, and
+  optional IP allowlists.
+- Security audit log for sign-ins, token changes, tag updates, and server
+  deletion.
 - Cross-platform Go agent for Linux, Windows, and macOS.
 - Local SQLite buffering when the backend is unavailable.
 - Automatic service installation and startup on supported operating systems.
+- Built-in alert events for sustained high CPU, high memory, high disk usage,
+  and offline servers.
+- Dedicated alert review page with active/resolved filters and recent event
+  context.
+- Optional webhook notifications for email relays, Telegram, Discord, Slack,
+  and custom receivers.
 - Light, dark, and system themes.
 - Two backend choices:
   - ASP.NET Core with PostgreSQL for conventional or Docker hosting.
@@ -193,6 +207,40 @@ npm run dev:d1
 See the [Worker deployment guide](worker-backend/README.md) for D1, Supabase,
 secrets, migrations, and production deployment.
 
+## Alerting
+
+Both backend implementations create persisted alert events and expose them at
+`GET /api/alerts` for authenticated users. Add `?status=active` or
+`?status=resolved` to filter the latest 100 events.
+
+Default rules:
+
+- CPU above 90% for 5 minutes.
+- Memory above 90%.
+- Disk above 85%.
+- Server offline for 2 minutes.
+
+Notifications are optional. Without a configured target, alerts are stored and
+logged. Configure one or more targets with environment variables:
+
+```sh
+# ASP.NET Core
+export Alerting__WebhookUrls__0='https://example.com/netrascope-alerts'
+export Alerting__DiscordWebhookUrl='https://discord.com/api/webhooks/...'
+export Alerting__SlackWebhookUrl='https://hooks.slack.com/services/...'
+export Alerting__TelegramBotToken='123456:bot-token'
+export Alerting__TelegramChatId='123456789'
+
+# Cloudflare Worker
+wrangler secret put ALERT_DISCORD_WEBHOOK_URL
+wrangler secret put ALERT_SLACK_WEBHOOK_URL
+wrangler secret put ALERT_TELEGRAM_BOT_TOKEN
+wrangler secret put ALERT_TELEGRAM_CHAT_ID
+```
+
+Generic webhook and email relay targets receive the alert JSON payload. Discord,
+Slack, and Telegram targets receive their native simple message format.
+
 ## Testing
 
 Run the backend and agent tests and validate both TypeScript projects:
@@ -223,13 +271,17 @@ cd ../worker-backend && npm run check
 - Replace all example passwords and JWT secrets before deployment.
 - Keep ingestion tokens private. Regenerate a token from Settings if it is
   exposed.
+- Prefer server-scoped tokens from each server detail page over the account-wide
+  ingestion token. Server tokens can be revoked or rotated individually.
+- Use token IP allowlists for agents with stable source addresses.
 - Restrict account registration if your deployment should not be public.
   Registration is currently open by default.
 - Configure database backups and monitor disk growth.
 - Define a retention or aggregation policy. At the default 10-second interval,
   each monitored server produces 8,640 metric rows per day.
-- Treat the built-in CPU threshold as a starting point. It currently logs a
-  critical event rather than sending external notifications.
+- Configure at least one alert notification target before relying on alerts for
+  production operations.
+- Review the Settings audit log after token, server, or tag changes.
 
 Please report vulnerabilities privately according to the
 [security policy](SECURITY.md) instead of opening a public issue.

@@ -5,15 +5,17 @@ import { HTTPException } from "hono/http-exception"
 import {
   createJwt,
   generateIngestionToken,
+  hashIngestionToken,
   hashPassword,
   readBearerToken,
+  tokenSuffix,
   verifyJwt,
   verifyPassword,
   type AuthenticatedUser,
 } from "./security"
 import { createStorage, DuplicateUsernameError } from "./storage"
 import { SupabaseError } from "./supabase"
-import type { MetricPacket, UserRow } from "./types"
+import type { AlertEventRow, MetricPacket, UserRow } from "./types"
 
 type Variables = {
   user: AuthenticatedUser
@@ -23,6 +25,11 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>()
 const maxTagLength = 50
 const maxTagsPerServer = 20
 const maxMetricBatchSize = 500
+const activeAlertStatus = "active"
+const resolvedAlertStatus = "resolved"
+const criticalAlertSeverity = "critical"
+const authRateLimit = createInMemoryRateLimiter(30, 60_000)
+const metricRateLimit = createInMemoryRateLimiter(900, 60_000)
 
 app.use("*", async (context, next) => {
   const origin: string = context.env.FRONTEND_ORIGIN
@@ -50,6 +57,9 @@ const requireUser: MiddlewareHandler<{ Bindings: Env; Variables: Variables }> = 
 app.get("/health", (context) => context.json({ status: "ok" }))
 
 app.post("/api/auth/register", async (context) => {
+  if (!authRateLimit(clientIp(context))) {
+    return context.json({ title: "Too Many Requests" }, 429)
+  }
   // Registration is open by default but can be disabled on private
   // deployments by setting ALLOW_REGISTRATION=false.
   if (String(context.env.ALLOW_REGISTRATION ?? "true").toLowerCase() === "false") {
@@ -79,9 +89,10 @@ app.post("/api/auth/register", async (context) => {
     CreatedAt: new Date().toISOString(),
   }
 
-  try {
-    await storage.createUser(user)
-  } catch (error) {
+	  try {
+	    await storage.createUser(user)
+    await audit(storage, user.Id, "user", "auth.registered", "user", user.Id, user.Username, context)
+	  } catch (error) {
     if (error instanceof DuplicateUsernameError) {
       return validationProblem(context, { Username: ["Username is already taken."] })
     }
@@ -93,6 +104,9 @@ app.post("/api/auth/register", async (context) => {
 })
 
 app.post("/api/auth/login", async (context) => {
+  if (!authRateLimit(clientIp(context))) {
+    return context.json({ title: "Too Many Requests" }, 429)
+  }
   const body = await readJson<{ username?: string; password?: string }>(context)
   if (!body.username || !body.password) {
     return context.json({ title: "Unauthorized" }, 401)
@@ -101,6 +115,7 @@ app.post("/api/auth/login", async (context) => {
   const storage = createStorage(context.env)
   const user = await storage.findUserByUsername(body.username.trim())
   if (!user || !(await verifyPassword(body.password, user.PasswordHash))) {
+    await audit(storage, user?.Id ?? null, "anonymous", "auth.login_failed", "user", user?.Id ?? null, body.username.trim(), context)
     return context.json({ title: "Unauthorized" }, 401)
   }
 
@@ -108,6 +123,7 @@ app.post("/api/auth/login", async (context) => {
     await storage.updatePassword(user.Id, await hashPassword(body.password))
   }
 
+  await audit(storage, user.Id, "user", "auth.login_succeeded", "user", user.Id, user.Username, context)
   const auth = await createJwt(context.env, { id: user.Id, username: user.Username })
   return context.json({ ...auth, username: user.Username })
 })
@@ -123,18 +139,27 @@ app.get("/api/auth/me", requireUser, async (context) => {
 app.post("/api/auth/token/regenerate", requireUser, async (context) => {
   const token = generateIngestionToken()
   const currentUser = context.get("user")
-  await createStorage(context.env).updateIngestionToken(currentUser.id, token)
+  const storage = createStorage(context.env)
+  await storage.updateIngestionToken(currentUser.id, token)
+  await audit(storage, currentUser.id, "user", "account_token.rotated", "user", currentUser.id, "Account-wide ingestion token rotated.", context)
   return context.json({ username: currentUser.username, ingestionToken: token })
 })
 
 app.post("/api/metrics", async (context) => {
+  if (!metricRateLimit(clientIp(context))) {
+    return context.json({ title: "Too Many Requests" }, 429)
+  }
   const ingestionToken = readBearerToken(context.req.header("Authorization"))
   if (!ingestionToken) {
     return context.json({ title: "Unauthorized" }, 401)
   }
 
   const storage = createStorage(context.env)
-  const ownerUserId = await storage.findOwnerByIngestionToken(ingestionToken)
+  const agentToken = await storage.findAgentTokenByHash(await hashIngestionToken(ingestionToken))
+  if (agentToken && !ipAllowed(agentToken.AllowedIpAddresses, clientIp(context))) {
+    return context.json({ title: "Unauthorized" }, 401)
+  }
+  const ownerUserId = agentToken?.OwnerUserId ?? (await storage.findOwnerByIngestionToken(ingestionToken))
   if (!ownerUserId) {
     return context.json({ title: "Unauthorized" }, 401)
   }
@@ -148,6 +173,10 @@ app.post("/api/metrics", async (context) => {
   const errors = validateMetrics(metrics.packets)
   if (Object.keys(errors).length > 0) {
     return validationProblem(context, errors)
+  }
+
+  if (agentToken && metrics.packets.some((packet) => packet.serverId !== agentToken.ServerId)) {
+    return context.json({ title: "Unauthorized" }, 401)
   }
 
   for (const packet of metrics.packets) {
@@ -166,15 +195,11 @@ app.post("/api/metrics", async (context) => {
       )
     }
 
-    if (packet.cpuUsagePct > 90) {
-      console.warn(
-        JSON.stringify({
-          event: "high_cpu",
-          serverId: packet.serverId,
-          cpuUsagePct: packet.cpuUsagePct,
-        }),
-      )
-    }
+    await evaluateMetricAlerts(storage, context.env, packet, ownerUserId)
+  }
+
+  if (agentToken) {
+    await storage.updateAgentTokenLastUsed(agentToken.Id, new Date().toISOString())
   }
 
   return context.body(null, 202)
@@ -205,10 +230,15 @@ app.get("/api/servers", requireUser, async (context) => {
 })
 
 app.delete("/api/servers/:serverId", requireUser, async (context) => {
-  const deleted = await createStorage(context.env).deleteServer(
-    context.req.param("serverId"),
+  const storage = createStorage(context.env)
+  const serverId = context.req.param("serverId")
+  const deleted = await storage.deleteServer(
+    serverId,
     context.get("user").id,
   )
+  if (deleted) {
+    await audit(storage, context.get("user").id, "user", "server.deleted", "server", serverId, serverId, context)
+  }
   return deleted
     ? context.body(null, 204)
     : context.json({ title: "Not Found" }, 404)
@@ -254,6 +284,136 @@ app.get("/api/servers/:serverId/tags", requireUser, async (context) => {
   })
 })
 
+app.get("/api/servers/:serverId/tokens", requireUser, async (context) => {
+  const serverId = context.req.param("serverId")
+  const storage = createStorage(context.env)
+  if (!(await storage.ownsServer(serverId, context.get("user").id))) {
+    return context.json({ title: "Not Found" }, 404)
+  }
+  const tokens = await storage.listAgentTokens(serverId, context.get("user").id)
+  return context.json(tokens.map(mapAgentTokenResponse))
+})
+
+app.post("/api/servers/:serverId/tokens", requireUser, async (context) => {
+  const serverId = context.req.param("serverId")
+  const storage = createStorage(context.env)
+  if (!(await storage.ownsServer(serverId, context.get("user").id))) {
+    return context.json({ title: "Not Found" }, 404)
+  }
+  const body = await readJson<{ name?: string; allowedIpAddresses?: unknown }>(context)
+  const validation = validateAgentTokenInput(body.name, body.allowedIpAddresses)
+  if ("errors" in validation) {
+    return validationProblem(context, validation.errors)
+  }
+  const rawToken = generateIngestionToken()
+  const now = new Date().toISOString()
+  const token = {
+    Id: crypto.randomUUID(),
+    ServerId: serverId,
+    OwnerUserId: context.get("user").id,
+    Name: validation.name,
+    TokenHash: await hashIngestionToken(rawToken),
+    TokenSuffix: tokenSuffix(rawToken),
+    AllowedIpAddresses: joinIpAllowlist(validation.allowedIpAddresses),
+    CreatedAt: now,
+    LastUsedAt: null,
+    RevokedAt: null,
+  }
+  await storage.createAgentToken(token)
+  await audit(storage, context.get("user").id, "user", "agent_token.created", "agent_token", token.Id, serverId, context)
+  return context.json({ ...mapAgentTokenResponse(token), token: rawToken }, 201)
+})
+
+app.put("/api/servers/:serverId/tokens/:tokenId", requireUser, async (context) => {
+  const serverId = context.req.param("serverId")
+  const tokenId = context.req.param("tokenId")
+  const storage = createStorage(context.env)
+  const existing = (await storage.listAgentTokens(serverId, context.get("user").id)).find(
+    (token) => token.Id === tokenId,
+  )
+  if (!existing) {
+    return context.json({ title: "Not Found" }, 404)
+  }
+  const body = await readJson<{ name?: string; allowedIpAddresses?: unknown }>(context)
+  const validation = validateAgentTokenInput(body.name, body.allowedIpAddresses)
+  if ("errors" in validation) {
+    return validationProblem(context, validation.errors)
+  }
+  const updated = {
+    ...existing,
+    Name: validation.name,
+    AllowedIpAddresses: joinIpAllowlist(validation.allowedIpAddresses),
+  }
+  await storage.updateAgentToken(updated)
+  await audit(storage, context.get("user").id, "user", "agent_token.updated", "agent_token", tokenId, serverId, context)
+  return context.json(mapAgentTokenResponse(updated))
+})
+
+app.post("/api/servers/:serverId/tokens/:tokenId/rotate", requireUser, async (context) => {
+  const serverId = context.req.param("serverId")
+  const tokenId = context.req.param("tokenId")
+  const storage = createStorage(context.env)
+  const existing = (await storage.listAgentTokens(serverId, context.get("user").id)).find(
+    (token) => token.Id === tokenId,
+  )
+  if (!existing) {
+    return context.json({ title: "Not Found" }, 404)
+  }
+  const rawToken = generateIngestionToken()
+  const updated = {
+    ...existing,
+    TokenHash: await hashIngestionToken(rawToken),
+    TokenSuffix: tokenSuffix(rawToken),
+    LastUsedAt: null,
+    RevokedAt: null,
+  }
+  await storage.updateAgentToken(updated)
+  await audit(storage, context.get("user").id, "user", "agent_token.rotated", "agent_token", tokenId, serverId, context)
+  return context.json({ ...mapAgentTokenResponse(updated), token: rawToken })
+})
+
+app.delete("/api/servers/:serverId/tokens/:tokenId", requireUser, async (context) => {
+  const serverId = context.req.param("serverId")
+  const tokenId = context.req.param("tokenId")
+  const storage = createStorage(context.env)
+  const existing = (await storage.listAgentTokens(serverId, context.get("user").id)).find(
+    (token) => token.Id === tokenId,
+  )
+  if (!existing) {
+    return context.json({ title: "Not Found" }, 404)
+  }
+  const updated = { ...existing, RevokedAt: existing.RevokedAt ?? new Date().toISOString() }
+  await storage.updateAgentToken(updated)
+  await audit(storage, context.get("user").id, "user", "agent_token.revoked", "agent_token", tokenId, serverId, context)
+  return context.json(mapAgentTokenResponse(updated))
+})
+
+app.get("/api/alerts", requireUser, async (context) => {
+  const status = context.req.query("status")?.trim().toLowerCase() ?? null
+  if (status !== null && status !== activeAlertStatus && status !== resolvedAlertStatus) {
+    return validationProblem(context, { status: ["Status must be active or resolved."] })
+  }
+
+  const alerts = await createStorage(context.env).listAlerts(context.get("user").id, status)
+  return context.json(alerts.map(mapAlertResponse))
+})
+
+app.get("/api/audit-logs", requireUser, async (context) => {
+  const logs = await createStorage(context.env).listAuditLogs(context.get("user").id)
+  return context.json(
+    logs.map((log) => ({
+      id: log.Id,
+      actorType: log.ActorType,
+      action: log.Action,
+      entityType: log.EntityType,
+      entityId: log.EntityId,
+      message: log.Message,
+      ipAddress: log.IpAddress,
+      createdAt: log.CreatedAt,
+    })),
+  )
+})
+
 app.put("/api/servers/:serverId/tags", requireUser, async (context) => {
   const body = await readJson<{ tags?: unknown }>(context)
   const validation = validateTags(body.tags)
@@ -262,7 +422,8 @@ app.put("/api/servers/:serverId/tags", requireUser, async (context) => {
   }
 
   const serverId = context.req.param("serverId")
-  const replaced = await createStorage(context.env).replaceServerTags(
+  const storage = createStorage(context.env)
+  const replaced = await storage.replaceServerTags(
     serverId,
     context.get("user").id,
     validation.tags,
@@ -270,6 +431,7 @@ app.put("/api/servers/:serverId/tags", requireUser, async (context) => {
   if (!replaced) {
     return context.json({ title: "Not Found" }, 404)
   }
+  await audit(storage, context.get("user").id, "user", "server.tags_updated", "server", serverId, validation.tags.join(","), context)
   return context.json({ serverId, tags: validation.tags })
 })
 
@@ -421,4 +583,480 @@ function validateTags(
   return { tags }
 }
 
-export default app
+function createInMemoryRateLimiter(limit: number, windowMs: number) {
+  const buckets = new Map<string, { count: number; resetAt: number }>()
+  return (key: string): boolean => {
+    const now = Date.now()
+    const bucket = buckets.get(key)
+    if (!bucket || bucket.resetAt <= now) {
+      buckets.set(key, { count: 1, resetAt: now + windowMs })
+      return true
+    }
+    if (bucket.count >= limit) {
+      return false
+    }
+    bucket.count += 1
+    return true
+  }
+}
+
+function clientIp(context: Context): string {
+  return (
+    context.req.header("CF-Connecting-IP") ??
+    context.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ??
+    "unknown"
+  )
+}
+
+async function audit(
+  storage: ReturnType<typeof createStorage>,
+  ownerUserId: string | null,
+  actorType: string,
+  action: string,
+  entityType: string,
+  entityId: string | null,
+  message: string | null,
+  context: Context,
+): Promise<void> {
+  await storage.createAuditLog({
+    OwnerUserId: ownerUserId,
+    ActorType: actorType,
+    Action: action,
+    EntityType: entityType,
+    EntityId: entityId,
+    Message: message,
+    IpAddress: clientIp(context) === "unknown" ? null : clientIp(context),
+    CreatedAt: new Date().toISOString(),
+  })
+}
+
+function mapAgentTokenResponse(token: {
+  Id: string
+  ServerId: string
+  Name: string
+  TokenSuffix: string
+  AllowedIpAddresses: string | null
+  CreatedAt: string
+  LastUsedAt: string | null
+  RevokedAt: string | null
+}) {
+  return {
+    id: token.Id,
+    serverId: token.ServerId,
+    name: token.Name,
+    tokenSuffix: token.TokenSuffix,
+    allowedIpAddresses: splitIpAllowlist(token.AllowedIpAddresses),
+    createdAt: token.CreatedAt,
+    lastUsedAt: token.LastUsedAt,
+    revokedAt: token.RevokedAt,
+  }
+}
+
+function validateAgentTokenInput(
+  nameValue: string | undefined,
+  allowedIpAddressesValue: unknown,
+): { name: string; allowedIpAddresses: string[] } | { errors: Record<string, string[]> } {
+  const errors: Record<string, string[]> = {}
+  const name = nameValue?.trim() || "Default agent token"
+  if (name.length > 100) {
+    errors.Name = ["Name cannot exceed 100 characters."]
+  }
+
+  if (allowedIpAddressesValue !== undefined && !Array.isArray(allowedIpAddressesValue)) {
+    errors.AllowedIpAddresses = ["AllowedIpAddresses must be an array of IP addresses."]
+  }
+
+  const allowedIpAddresses = Array.isArray(allowedIpAddressesValue)
+    ? [
+        ...new Set(
+          allowedIpAddressesValue
+            .filter((item): item is string => typeof item === "string")
+            .map((ip) => ip.trim())
+            .filter(Boolean),
+        ),
+      ]
+    : []
+
+  if (
+    allowedIpAddresses.length !==
+      (Array.isArray(allowedIpAddressesValue)
+        ? allowedIpAddressesValue.filter((item) => typeof item === "string" && item.trim()).length
+        : allowedIpAddresses.length) ||
+    allowedIpAddresses.some((ip) => ip.length > 45 || ip.includes(","))
+  ) {
+    errors.AllowedIpAddresses = [
+      "IP allowlist entries must be plain IP addresses up to 45 characters.",
+    ]
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { errors }
+  }
+
+  return { name, allowedIpAddresses }
+}
+
+function joinIpAllowlist(allowedIpAddresses: string[]): string | null {
+  return allowedIpAddresses.length === 0 ? null : allowedIpAddresses.join(",")
+}
+
+function splitIpAllowlist(value: string | null): string[] {
+  return value ? value.split(",").map((ip) => ip.trim()).filter(Boolean) : []
+}
+
+function ipAllowed(allowedIpAddresses: string | null, ipAddress: string): boolean {
+  const allowed = splitIpAllowlist(allowedIpAddresses)
+  return allowed.length === 0 || allowed.includes(ipAddress)
+}
+
+interface AlertingSettings {
+  enabled: boolean
+  cpuThresholdPct: number
+  cpuSustainedMinutes: number
+  memoryThresholdPct: number
+  diskThresholdPct: number
+  offlineMinutes: number
+  webhookUrls: string[]
+  emailWebhookUrl: string | null
+  discordWebhookUrl: string | null
+  slackWebhookUrl: string | null
+  telegramBotToken: string | null
+  telegramChatId: string | null
+}
+
+async function evaluateMetricAlerts(
+  storage: ReturnType<typeof createStorage>,
+  env: Env,
+  packet: MetricPacket,
+  ownerUserId: string,
+): Promise<void> {
+  const settings = alertingSettings(env)
+  if (!settings.enabled) {
+    return
+  }
+
+  const observedAt = parseMetricDate(packet.timestamp)
+  const memoryPct = (packet.memoryUsedBytes / packet.memoryTotalBytes) * 100
+  const cpuSustained = await isCpuSustained(storage, packet, observedAt, settings)
+
+  await evaluateRule(
+    storage,
+    env,
+    packet.serverId,
+    ownerUserId,
+    "cpu_high_5m",
+    cpuSustained,
+    packet.cpuUsagePct,
+    settings.cpuThresholdPct,
+    observedAt,
+    `CPU stayed above ${settings.cpuThresholdPct}% for ${settings.cpuSustainedMinutes} minutes.`,
+    "CPU recovered below the sustained alert threshold.",
+  )
+  await evaluateRule(
+    storage,
+    env,
+    packet.serverId,
+    ownerUserId,
+    "memory_high",
+    memoryPct > settings.memoryThresholdPct,
+    memoryPct,
+    settings.memoryThresholdPct,
+    observedAt,
+    `Memory usage is ${formatPct(memoryPct)}%, above ${settings.memoryThresholdPct}%.`,
+    "Memory usage recovered below the alert threshold.",
+  )
+  await evaluateRule(
+    storage,
+    env,
+    packet.serverId,
+    ownerUserId,
+    "disk_high",
+    packet.diskUtilizationPct > settings.diskThresholdPct,
+    packet.diskUtilizationPct,
+    settings.diskThresholdPct,
+    observedAt,
+    `Disk usage is ${formatPct(packet.diskUtilizationPct)}%, above ${settings.diskThresholdPct}%.`,
+    "Disk usage recovered below the alert threshold.",
+  )
+  await resolveAlert(
+    storage,
+    env,
+    packet.serverId,
+    ownerUserId,
+    "server_offline",
+    observedAt.toISOString(),
+    "Server heartbeat recovered.",
+  )
+}
+
+async function evaluateOfflineAlerts(env: Env): Promise<void> {
+  const settings = alertingSettings(env)
+  if (!settings.enabled) {
+    return
+  }
+
+  const storage = createStorage(env)
+  const now = new Date()
+  const cutoff = new Date(now.getTime() - settings.offlineMinutes * 60_000).toISOString()
+  const servers = await storage.listOfflineServers(cutoff)
+  for (const server of servers) {
+    if (!server.OwnerUserId) {
+      continue
+    }
+    await triggerAlert(
+      storage,
+      env,
+      server.Id,
+      server.OwnerUserId,
+      "server_offline",
+      null,
+      settings.offlineMinutes,
+      now.toISOString(),
+      `Server has been offline since ${server.LastHeartbeatAt}.`,
+    )
+  }
+}
+
+async function isCpuSustained(
+  storage: ReturnType<typeof createStorage>,
+  packet: MetricPacket,
+  observedAt: Date,
+  settings: AlertingSettings,
+): Promise<boolean> {
+  const since = new Date(observedAt.getTime() - settings.cpuSustainedMinutes * 60_000)
+  const points = await storage.listMetrics(packet.serverId, since.toISOString())
+  const bounded = points.filter((point) => parseMetricDate(point.Timestamp) <= observedAt)
+  return (
+    bounded.length > 0 &&
+    Math.min(...bounded.map((point) => parseMetricDate(point.Timestamp).getTime())) <=
+      since.getTime() &&
+    bounded.every((point) => point.CpuUsagePct > settings.cpuThresholdPct)
+  )
+}
+
+async function evaluateRule(
+  storage: ReturnType<typeof createStorage>,
+  env: Env,
+  serverId: string,
+  ownerUserId: string,
+  ruleKey: string,
+  isTriggered: boolean,
+  triggerValue: number,
+  thresholdValue: number,
+  observedAt: Date,
+  triggerMessage: string,
+  resolveMessage: string,
+): Promise<void> {
+  if (isTriggered) {
+    await triggerAlert(
+      storage,
+      env,
+      serverId,
+      ownerUserId,
+      ruleKey,
+      triggerValue,
+      thresholdValue,
+      observedAt.toISOString(),
+      triggerMessage,
+    )
+    return
+  }
+
+  await resolveAlert(
+    storage,
+    env,
+    serverId,
+    ownerUserId,
+    ruleKey,
+    observedAt.toISOString(),
+    resolveMessage,
+  )
+}
+
+async function triggerAlert(
+  storage: ReturnType<typeof createStorage>,
+  env: Env,
+  serverId: string,
+  ownerUserId: string,
+  ruleKey: string,
+  triggerValue: number | null,
+  thresholdValue: number | null,
+  observedAt: string,
+  message: string,
+): Promise<void> {
+  const active = await storage.findActiveAlert(serverId, ownerUserId, ruleKey)
+  if (active) {
+    await storage.updateAlert({
+      ...active,
+      Message: message,
+      TriggerValue: triggerValue,
+      LastObservedAt: observedAt,
+    })
+    return
+  }
+
+  const created = await storage.createAlert({
+    ServerId: serverId,
+    OwnerUserId: ownerUserId,
+    RuleKey: ruleKey,
+    Severity: criticalAlertSeverity,
+    Status: activeAlertStatus,
+    Message: message,
+    TriggerValue: triggerValue,
+    ThresholdValue: thresholdValue,
+    TriggeredAt: observedAt,
+    LastObservedAt: observedAt,
+    ResolvedAt: null,
+  })
+  await notifyAlert(env, created)
+  await storage.updateAlert({ ...created, LastNotifiedAt: new Date().toISOString() })
+}
+
+async function resolveAlert(
+  storage: ReturnType<typeof createStorage>,
+  env: Env,
+  serverId: string,
+  ownerUserId: string,
+  ruleKey: string,
+  observedAt: string,
+  message: string,
+): Promise<void> {
+  const active = await storage.findActiveAlert(serverId, ownerUserId, ruleKey)
+  if (!active) {
+    return
+  }
+
+  const resolved: AlertEventRow = {
+    ...active,
+    Status: resolvedAlertStatus,
+    Message: message,
+    LastObservedAt: observedAt,
+    ResolvedAt: observedAt,
+  }
+  await storage.updateAlert(resolved)
+  await notifyAlert(env, resolved)
+  await storage.updateAlert({ ...resolved, LastNotifiedAt: new Date().toISOString() })
+}
+
+async function notifyAlert(env: Env, alert: AlertEventRow): Promise<void> {
+  const settings = alertingSettings(env)
+  const payload = mapAlertResponse(alert)
+  const text = `NetraScope ${alert.Status.toUpperCase()} ${alert.RuleKey} for ${alert.ServerId}: ${alert.Message}`
+  const targets: Array<{ url: string; body: unknown }> = [
+    ...settings.webhookUrls.map((url) => ({ url, body: payload })),
+    ...(settings.emailWebhookUrl ? [{ url: settings.emailWebhookUrl, body: payload }] : []),
+    ...(settings.discordWebhookUrl
+      ? [{ url: settings.discordWebhookUrl, body: { content: text } }]
+      : []),
+    ...(settings.slackWebhookUrl ? [{ url: settings.slackWebhookUrl, body: { text } }] : []),
+  ]
+
+  if (settings.telegramBotToken && settings.telegramChatId) {
+    targets.push({
+      url: `https://api.telegram.org/bot${settings.telegramBotToken}/sendMessage`,
+      body: { chat_id: settings.telegramChatId, text },
+    })
+  }
+
+  if (targets.length === 0) {
+    console.warn(JSON.stringify({ event: "alert.changed", alert: payload }))
+    return
+  }
+
+  await Promise.all(
+    targets.map(async (target) => {
+      try {
+        const response = await fetch(target.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(target.body),
+        })
+        if (!response.ok) {
+          console.warn(
+            JSON.stringify({
+              event: "alert.notification_failed",
+              status: response.status,
+              url: target.url,
+            }),
+          )
+        }
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "alert.notification_failed",
+            url: target.url,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        )
+      }
+    }),
+  )
+}
+
+function mapAlertResponse(alert: AlertEventRow) {
+  return {
+    id: alert.Id,
+    serverId: alert.ServerId,
+    ruleKey: alert.RuleKey,
+    severity: alert.Severity,
+    status: alert.Status,
+    message: alert.Message,
+    triggerValue: alert.TriggerValue,
+    thresholdValue: alert.ThresholdValue,
+    triggeredAt: alert.TriggeredAt,
+    lastObservedAt: alert.LastObservedAt,
+    resolvedAt: alert.ResolvedAt,
+    lastNotifiedAt: alert.LastNotifiedAt,
+  }
+}
+
+function alertingSettings(env: Env): AlertingSettings {
+  return {
+    enabled: readEnv(env, "ALERTING_ENABLED", "true").toLowerCase() !== "false",
+    cpuThresholdPct: readNumberEnv(env, "ALERT_CPU_THRESHOLD_PCT", 90),
+    cpuSustainedMinutes: readNumberEnv(env, "ALERT_CPU_SUSTAINED_MINUTES", 5),
+    memoryThresholdPct: readNumberEnv(env, "ALERT_MEMORY_THRESHOLD_PCT", 90),
+    diskThresholdPct: readNumberEnv(env, "ALERT_DISK_THRESHOLD_PCT", 85),
+    offlineMinutes: readNumberEnv(env, "ALERT_OFFLINE_MINUTES", 2),
+    webhookUrls: readEnv(env, "ALERT_WEBHOOK_URLS", "")
+      .split(",")
+      .map((url) => url.trim())
+      .filter(Boolean),
+    emailWebhookUrl: optionalEnv(env, "ALERT_EMAIL_WEBHOOK_URL"),
+    discordWebhookUrl: optionalEnv(env, "ALERT_DISCORD_WEBHOOK_URL"),
+    slackWebhookUrl: optionalEnv(env, "ALERT_SLACK_WEBHOOK_URL"),
+    telegramBotToken: optionalEnv(env, "ALERT_TELEGRAM_BOT_TOKEN"),
+    telegramChatId: optionalEnv(env, "ALERT_TELEGRAM_CHAT_ID"),
+  }
+}
+
+function readNumberEnv(env: Env, key: string, fallback: number): number {
+  const value = Number(readEnv(env, key, String(fallback)))
+  return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+function optionalEnv(env: Env, key: string): string | null {
+  const value = readEnv(env, key, "").trim()
+  return value || null
+}
+
+function readEnv(env: Env, key: string, fallback: string): string {
+  const values = env as unknown as Record<string, string | undefined>
+  return values[key] ?? fallback
+}
+
+function parseMetricDate(value: string): Date {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? new Date() : date
+}
+
+function formatPct(value: number): string {
+  return Number(value.toFixed(1)).toString()
+}
+
+export default {
+  fetch: app.fetch,
+  scheduled(_event: ScheduledEvent, env: Env, context: ExecutionContext) {
+    context.waitUntil(evaluateOfflineAlerts(env))
+  },
+}

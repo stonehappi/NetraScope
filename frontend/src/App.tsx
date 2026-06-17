@@ -17,6 +17,9 @@ const RegisterPage = lazy(() =>
 const DashboardPage = lazy(() =>
   import("@/pages/dashboard-page").then((m) => ({ default: m.DashboardPage })),
 )
+const AlertsPage = lazy(() =>
+  import("@/pages/alerts-page").then((m) => ({ default: m.AlertsPage })),
+)
 const ServerDetailPage = lazy(() =>
   import("@/pages/server-detail-page").then((m) => ({ default: m.ServerDetailPage })),
 )
@@ -37,6 +40,7 @@ function App() {
         <Route element={<RequireAuth />}>
           <Route element={<AppLayout />}>
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="alerts" element={<AlertsPage />} />
             <Route path="servers/:serverId" element={<ServerDetailPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>

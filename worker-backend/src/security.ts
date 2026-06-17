@@ -138,6 +138,15 @@ export function generateIngestionToken(): string {
   ).join("")
 }
 
+export async function hashIngestionToken(token: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", encoder.encode(token))
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+export function tokenSuffix(token: string): string {
+  return token.length <= 8 ? token : token.slice(-8)
+}
+
 export async function createJwt(
   env: Env,
   user: AuthenticatedUser,

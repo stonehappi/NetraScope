@@ -10,7 +10,14 @@
     "JWT_ISSUER": "NetraScope",
     "JWT_AUDIENCE": "NetraScope",
     "JWT_EXPIRY_MINUTES": "60",
-    "ALLOW_REGISTRATION": "true"
+    "ALLOW_REGISTRATION": "true",
+    "ALERTING_ENABLED": "true",
+    "ALERT_CPU_THRESHOLD_PCT": "90",
+    "ALERT_CPU_SUSTAINED_MINUTES": "5",
+    "ALERT_MEMORY_THRESHOLD_PCT": "90",
+    "ALERT_DISK_THRESHOLD_PCT": "85",
+    "ALERT_OFFLINE_MINUTES": "2",
+    "ALERT_WEBHOOK_URLS": ""
   },
   "secrets": {
     "required": [

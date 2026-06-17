@@ -16,6 +16,12 @@ public sealed class NetraDbContext(DbContextOptions<NetraDbContext> options)
 
     public DbSet<User> Users => Set<User>();
 
+    public DbSet<AlertEvent> AlertEvents => Set<AlertEvent>();
+
+    public DbSet<AgentToken> AgentTokens => Set<AgentToken>();
+
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Server>(entity =>
@@ -95,6 +101,73 @@ public sealed class NetraDbContext(DbContextOptions<NetraDbContext> options)
 
             entity.HasIndex(user => user.Username).IsUnique();
             entity.HasIndex(user => user.IngestionToken).IsUnique();
+        });
+
+        modelBuilder.Entity<AlertEvent>(entity =>
+        {
+            entity.ToTable("alert_events");
+            entity.HasKey(alert => alert.Id);
+            entity.Property(alert => alert.Id).UseIdentityByDefaultColumn();
+            entity.Property(alert => alert.ServerId).HasMaxLength(200).IsRequired();
+            entity.Property(alert => alert.RuleKey).HasMaxLength(100).IsRequired();
+            entity.Property(alert => alert.Severity).HasMaxLength(20).IsRequired();
+            entity.Property(alert => alert.Status).HasMaxLength(20).IsRequired();
+            entity.Property(alert => alert.Message).HasMaxLength(500).IsRequired();
+            entity.Property(alert => alert.TriggeredAt).IsRequired();
+            entity.Property(alert => alert.LastObservedAt).IsRequired();
+
+            entity.HasIndex(alert => alert.OwnerUserId);
+            entity.HasIndex(alert => new { alert.ServerId, alert.RuleKey, alert.Status });
+            entity.HasIndex(alert => alert.LastObservedAt);
+
+            entity
+                .HasOne(alert => alert.Server)
+                .WithMany(server => server.AlertEvents)
+                .HasForeignKey(alert => alert.ServerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AgentToken>(entity =>
+        {
+            entity.ToTable("agent_tokens");
+            entity.HasKey(token => token.Id);
+            entity.Property(token => token.ServerId).HasMaxLength(200).IsRequired();
+            entity.Property(token => token.Name).HasMaxLength(100).IsRequired();
+            entity.Property(token => token.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(token => token.TokenSuffix).HasMaxLength(16).IsRequired();
+            entity.Property(token => token.AllowedIpAddresses).HasMaxLength(1000);
+            entity.Property(token => token.CreatedAt).IsRequired();
+
+            entity.HasIndex(token => token.TokenHash).IsUnique();
+            entity.HasIndex(token => new { token.ServerId, token.OwnerUserId });
+
+            entity
+                .HasOne(token => token.Server)
+                .WithMany(server => server.AgentTokens)
+                .HasForeignKey(token => token.ServerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity
+                .HasOne(token => token.Owner)
+                .WithMany()
+                .HasForeignKey(token => token.OwnerUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.ToTable("audit_logs");
+            entity.HasKey(log => log.Id);
+            entity.Property(log => log.Id).UseIdentityByDefaultColumn();
+            entity.Property(log => log.ActorType).HasMaxLength(50).IsRequired();
+            entity.Property(log => log.Action).HasMaxLength(100).IsRequired();
+            entity.Property(log => log.EntityType).HasMaxLength(100).IsRequired();
+            entity.Property(log => log.EntityId).HasMaxLength(200);
+            entity.Property(log => log.Message).HasMaxLength(500);
+            entity.Property(log => log.IpAddress).HasMaxLength(45);
+            entity.Property(log => log.CreatedAt).IsRequired();
+
+            entity.HasIndex(log => new { log.OwnerUserId, log.CreatedAt });
         });
     }
 }

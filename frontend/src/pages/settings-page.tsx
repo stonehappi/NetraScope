@@ -1,13 +1,14 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Copy, Eye, EyeOff, RefreshCw } from "lucide-react"
+import { Copy, Eye, EyeOff, RefreshCw, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ApiError, getMe, regenerateIngestionToken } from "@/lib/api"
+import { ApiError, getAuditLogs, getMe, regenerateIngestionToken } from "@/lib/api"
+import { formatRelativeTime } from "@/lib/format"
 
 export function SettingsPage() {
   const queryClient = useQueryClient()
@@ -16,6 +17,11 @@ export function SettingsPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["me"],
     queryFn: getMe,
+  })
+
+  const auditQuery = useQuery({
+    queryKey: ["audit-logs"],
+    queryFn: getAuditLogs,
   })
 
   const regenerateMutation = useMutation({
@@ -107,6 +113,45 @@ export function SettingsPage() {
               </p>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="size-4" />
+            Security audit log
+          </CardTitle>
+          <CardDescription>
+            Recent account, token, server, and configuration security events.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {auditQuery.isLoading && <Skeleton className="h-24 w-full" />}
+          {auditQuery.isError && (
+            <p className="text-sm text-destructive">Couldn't load audit events.</p>
+          )}
+          {!auditQuery.isLoading && !auditQuery.isError && (auditQuery.data?.length ?? 0) === 0 && (
+            <p className="text-sm text-muted-foreground">No audit events recorded yet.</p>
+          )}
+          {auditQuery.data?.slice(0, 12).map((event) => (
+            <div key={event.id} className="rounded-lg border p-3">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <p className="font-medium">{event.action.replaceAll("_", " ")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {formatRelativeTime(event.createdAt)}
+                </p>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {event.entityType}
+                {event.entityId ? ` · ${event.entityId}` : ""}
+                {event.ipAddress ? ` · ${event.ipAddress}` : ""}
+              </p>
+              {event.message && (
+                <p className="mt-1 text-xs text-muted-foreground">{event.message}</p>
+              )}
+            </div>
+          ))}
         </CardContent>
       </Card>
     </div>

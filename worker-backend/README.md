@@ -53,7 +53,8 @@ npm run dry-run:d1
 npm run deploy:d1
 ```
 
-The D1 migration is stored in `migrations/0001_initial.sql`.
+The D1 migrations are stored in `migrations/`. Run migrations again after
+pulling updates so the `alert_events` table is created.
 
 ## Option B: Supabase
 
@@ -136,6 +137,65 @@ export NETRASCOPE_TOKEN=TOKEN_FROM_THE_SETTINGS_PAGE
 
 Both storage backends expose the same API, so the frontend and agent do not
 need backend-specific changes.
+
+## Alerting
+
+The Worker stores alert events and serves them at:
+
+```sh
+curl 'https://YOUR_WORKER/api/alerts?status=active' \
+  -H 'Authorization: Bearer YOUR_JWT'
+```
+
+Rules are enabled by default:
+
+- `cpu_high_5m`: CPU above 90% for 5 minutes.
+- `memory_high`: memory above 90%.
+- `disk_high`: disk above 85%.
+- `server_offline`: no heartbeat for 2 minutes.
+
+The scheduled Worker trigger in `wrangler.jsonc` checks for offline servers once
+per minute. Thresholds can be changed with Worker variables:
+
+```text
+ALERTING_ENABLED=true
+ALERT_CPU_THRESHOLD_PCT=90
+ALERT_CPU_SUSTAINED_MINUTES=5
+ALERT_MEMORY_THRESHOLD_PCT=90
+ALERT_DISK_THRESHOLD_PCT=85
+ALERT_OFFLINE_MINUTES=2
+ALERT_WEBHOOK_URLS=https://example.com/one,https://example.com/two
+```
+
+Use Wrangler secrets for notification URLs and tokens:
+
+```sh
+wrangler secret put ALERT_EMAIL_WEBHOOK_URL
+wrangler secret put ALERT_DISCORD_WEBHOOK_URL
+wrangler secret put ALERT_SLACK_WEBHOOK_URL
+wrangler secret put ALERT_TELEGRAM_BOT_TOKEN
+wrangler secret put ALERT_TELEGRAM_CHAT_ID
+```
+
+## Security hardening
+
+The Worker supports the same server-scoped token and audit APIs as the .NET
+backend:
+
+```sh
+curl -X POST https://YOUR_WORKER/api/servers/web-01/tokens \
+  -H 'Authorization: Bearer YOUR_JWT' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"web-01 primary","allowedIpAddresses":["203.0.113.10"]}'
+
+curl https://YOUR_WORKER/api/audit-logs \
+  -H 'Authorization: Bearer YOUR_JWT'
+```
+
+Server-scoped tokens are stored hashed, can be rotated or revoked individually,
+and require matching `serverId` values when used for metric ingestion. Optional
+IP allowlists use exact IP address matches. Authentication and metric ingestion
+also have lightweight request throttling in the Worker isolate.
 
 Authenticated users can delete servers they own with
 `DELETE /api/servers/{serverId}`. Deletion also removes metric history and tag

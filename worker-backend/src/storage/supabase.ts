@@ -1,6 +1,14 @@
 import { eq, SupabaseError, supabaseRequest } from "../supabase"
 import { DuplicateUsernameError, type Storage } from "../storage"
-import type { MetricPacket, MetricRow, ServerRow, UserRow } from "../types"
+import type {
+  AgentTokenRow,
+  AlertEventRow,
+  AuditLogRow,
+  MetricPacket,
+  MetricRow,
+  ServerRow,
+  UserRow,
+} from "../types"
 
 export class SupabaseStorage implements Storage {
   constructor(private readonly env: Env) {}
@@ -84,7 +92,7 @@ export class SupabaseStorage implements Storage {
   async listServers(ownerUserId: string, tag: string | null): Promise<ServerRow[]> {
     const relation = tag ? "server_tags!inner(TagName)" : "server_tags(TagName)"
     let query =
-      `servers?select=Id,HostName,IpAddress,LastHeartbeatAt,${relation}` +
+      `servers?select=Id,HostName,IpAddress,LastHeartbeatAt,OwnerUserId,${relation}` +
       `&OwnerUserId=${eq(ownerUserId)}&order=Id.asc`
     if (tag) {
       query += `&server_tags.TagName=${eq(tag)}`
@@ -127,7 +135,7 @@ export class SupabaseStorage implements Storage {
   ): Promise<ServerRow | null> {
     const rows = await supabaseRequest<ServerRow[]>(
       this.env,
-      `servers?select=Id,server_tags(TagName)&Id=${eq(serverId)}&OwnerUserId=${eq(ownerUserId)}&limit=1`,
+      `servers?select=Id,HostName,IpAddress,LastHeartbeatAt,OwnerUserId,server_tags(TagName)&Id=${eq(serverId)}&OwnerUserId=${eq(ownerUserId)}&limit=1`,
     )
     return rows[0] ?? null
   }
@@ -144,6 +152,128 @@ export class SupabaseStorage implements Storage {
         p_owner_user_id: ownerUserId,
         p_tags: tags,
       }),
+    })
+  }
+
+  async listAlerts(ownerUserId: string, status: string | null): Promise<AlertEventRow[]> {
+    let query =
+      `alert_events?select=*&OwnerUserId=${eq(ownerUserId)}` +
+      "&order=LastObservedAt.desc&limit=100"
+    if (status) {
+      query += `&Status=${eq(status)}`
+    }
+    return supabaseRequest<AlertEventRow[]>(this.env, query)
+  }
+
+  async findActiveAlert(
+    serverId: string,
+    ownerUserId: string,
+    ruleKey: string,
+  ): Promise<AlertEventRow | null> {
+    const rows = await supabaseRequest<AlertEventRow[]>(
+      this.env,
+      `alert_events?select=*&ServerId=${eq(serverId)}&OwnerUserId=${eq(ownerUserId)}` +
+        `&RuleKey=${eq(ruleKey)}&Status=eq.active&limit=1`,
+    )
+    return rows[0] ?? null
+  }
+
+  async createAlert(alert: Omit<AlertEventRow, "Id" | "LastNotifiedAt">): Promise<AlertEventRow> {
+    const rows = await supabaseRequest<AlertEventRow[]>(this.env, "alert_events", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(alert),
+    })
+    const created = rows[0]
+    if (!created) {
+      throw new Error("Failed to create alert event")
+    }
+    return created
+  }
+
+  async updateAlert(alert: AlertEventRow): Promise<void> {
+    await supabaseRequest<void>(this.env, `alert_events?Id=eq.${alert.Id}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        Severity: alert.Severity,
+        Status: alert.Status,
+        Message: alert.Message,
+        TriggerValue: alert.TriggerValue,
+        LastObservedAt: alert.LastObservedAt,
+        ResolvedAt: alert.ResolvedAt,
+        LastNotifiedAt: alert.LastNotifiedAt,
+      }),
+    })
+  }
+
+  async listOfflineServers(cutoff: string): Promise<ServerRow[]> {
+    return supabaseRequest<ServerRow[]>(
+      this.env,
+      "servers?select=Id,HostName,IpAddress,LastHeartbeatAt,OwnerUserId,server_tags(TagName)" +
+        `&OwnerUserId=not.is.null&LastHeartbeatAt=lte.${encodeURIComponent(cutoff)}` +
+        "&order=Id.asc",
+    )
+  }
+
+  async findAgentTokenByHash(tokenHash: string): Promise<AgentTokenRow | null> {
+    const rows = await supabaseRequest<AgentTokenRow[]>(
+      this.env,
+      `agent_tokens?select=*&TokenHash=${eq(tokenHash)}&RevokedAt=is.null&limit=1`,
+    )
+    return rows[0] ?? null
+  }
+
+  async listAgentTokens(serverId: string, ownerUserId: string): Promise<AgentTokenRow[]> {
+    return supabaseRequest<AgentTokenRow[]>(
+      this.env,
+      `agent_tokens?select=*&ServerId=${eq(serverId)}&OwnerUserId=${eq(ownerUserId)}&order=CreatedAt.desc`,
+    )
+  }
+
+  async createAgentToken(token: AgentTokenRow): Promise<void> {
+    await supabaseRequest<void>(this.env, "agent_tokens", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(token),
+    })
+  }
+
+  async updateAgentToken(token: AgentTokenRow): Promise<void> {
+    await supabaseRequest<void>(this.env, `agent_tokens?Id=${eq(token.Id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        Name: token.Name,
+        TokenHash: token.TokenHash,
+        TokenSuffix: token.TokenSuffix,
+        AllowedIpAddresses: token.AllowedIpAddresses,
+        LastUsedAt: token.LastUsedAt,
+        RevokedAt: token.RevokedAt,
+      }),
+    })
+  }
+
+  async updateAgentTokenLastUsed(tokenId: string, lastUsedAt: string): Promise<void> {
+    await supabaseRequest<void>(this.env, `agent_tokens?Id=${eq(tokenId)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ LastUsedAt: lastUsedAt }),
+    })
+  }
+
+  async listAuditLogs(ownerUserId: string): Promise<AuditLogRow[]> {
+    return supabaseRequest<AuditLogRow[]>(
+      this.env,
+      `audit_logs?select=*&OwnerUserId=${eq(ownerUserId)}&order=CreatedAt.desc&limit=100`,
+    )
+  }
+
+  async createAuditLog(log: Omit<AuditLogRow, "Id">): Promise<void> {
+    await supabaseRequest<void>(this.env, "audit_logs", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(log),
     })
   }
 }

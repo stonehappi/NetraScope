@@ -7,15 +7,22 @@ import { StatusBadge } from "@/components/servers/status-badge"
 import { UsageMeter } from "@/components/servers/usage-meter"
 import { getServerMetrics } from "@/lib/api"
 import { formatBytesPerSecond, formatRelativeTime } from "@/lib/format"
-import type { ServerSummary } from "@/types/api"
+import type { MetricPoint, ServerSummary } from "@/types/api"
 
-export function ServerCard({ server }: { server: ServerSummary }) {
+export function ServerCard({
+  server,
+  latestMetric,
+}: {
+  server: ServerSummary
+  latestMetric?: MetricPoint | null
+}) {
   const { data } = useQuery({
     queryKey: ["server-metrics-latest", server.id],
     queryFn: () => getServerMetrics(server.id, 5),
+    enabled: latestMetric === undefined,
   })
 
-  const latest = data?.at(-1)
+  const latest = latestMetric === undefined ? data?.at(-1) : latestMetric
 
   return (
     <Link

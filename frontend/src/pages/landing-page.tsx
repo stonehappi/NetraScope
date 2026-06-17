@@ -184,7 +184,7 @@ export function LandingPage() {
             </h2>
             <p className="max-w-2xl text-muted-foreground sm:text-lg">
               Switch between 15-minute, 1-hour, 6-hour, and 24-hour windows to spot
-              trends over time, with thresholds that flag CPU or disk usage above 90%.
+              trends over time, with thresholds for sustained CPU, memory, disk, and offline servers.
             </p>
             <div className="grid gap-4 pt-2 sm:grid-cols-2 lg:grid-cols-4">
               <img src="/cpu-usage.png" alt="CPU usage history chart" className="w-full" loading="lazy" />

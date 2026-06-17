@@ -11,6 +11,7 @@ namespace NetraScope.Core.Auth;
 public sealed class IngestionTokenFilter : IEndpointFilter
 {
     public const string OwnerUserIdKey = "OwnerUserId";
+    public const string TokenContextKey = "IngestionTokenContext";
 
     private const string BearerPrefix = "Bearer ";
 
@@ -24,8 +25,40 @@ public sealed class IngestionTokenFilter : IEndpointFilter
             return Results.Unauthorized();
         }
 
-        var providedToken = authHeader[BearerPrefix.Length..];
+        var providedToken = authHeader[BearerPrefix.Length..].Trim();
+        var tokenHash = IngestionTokenHasher.Hash(providedToken);
         var db = context.HttpContext.RequestServices.GetRequiredService<NetraDbContext>();
+
+        var agentToken = await db.AgentTokens
+            .AsNoTracking()
+            .Where(token => token.TokenHash == tokenHash && token.RevokedAt == null)
+            .Select(token => new
+            {
+                token.Id,
+                token.OwnerUserId,
+                token.ServerId,
+                token.AllowedIpAddresses,
+            })
+            .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+
+        if (agentToken is not null)
+        {
+            var remoteIp = context.HttpContext.Connection.RemoteIpAddress?.ToString();
+            if (!IpAllowed(agentToken.AllowedIpAddresses, remoteIp))
+            {
+                return Results.Unauthorized();
+            }
+
+            var tokenContext = new IngestionTokenContext(
+                agentToken.OwnerUserId,
+                agentToken.Id,
+                agentToken.ServerId,
+                IsServerScoped: true);
+            context.HttpContext.Items[OwnerUserIdKey] = agentToken.OwnerUserId;
+            context.HttpContext.Items[TokenContextKey] = tokenContext;
+            return await next(context);
+        }
+
         var ownerUserId = await db.Users
             .AsNoTracking()
             .Where(user => user.IngestionToken == providedToken)
@@ -38,6 +71,28 @@ public sealed class IngestionTokenFilter : IEndpointFilter
         }
 
         context.HttpContext.Items[OwnerUserIdKey] = ownerUserId;
+        context.HttpContext.Items[TokenContextKey] = new IngestionTokenContext(
+            ownerUserId,
+            AgentTokenId: null,
+            ServerId: null,
+            IsServerScoped: false);
         return await next(context);
+    }
+
+    private static bool IpAllowed(string? allowedIpAddresses, string? remoteIp)
+    {
+        if (string.IsNullOrWhiteSpace(allowedIpAddresses))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(remoteIp))
+        {
+            return false;
+        }
+
+        return allowedIpAddresses
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(ip => string.Equals(ip, remoteIp, StringComparison.Ordinal));
     }
 }

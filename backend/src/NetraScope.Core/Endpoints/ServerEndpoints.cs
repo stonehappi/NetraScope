@@ -5,6 +5,7 @@ using NetraScope.Core.Auth;
 using NetraScope.Core.Contracts;
 using NetraScope.Core.Data;
 using NetraScope.Core.Entities;
+using NetraScope.Core.Security;
 
 namespace NetraScope.Core.Endpoints;
 
@@ -108,6 +109,7 @@ public static class ServerEndpoints
         string serverId,
         [FromBody] ReplaceServerTagsRequest request,
         ClaimsPrincipal user,
+        HttpContext httpContext,
         NetraDbContext db,
         CancellationToken cancellationToken)
     {
@@ -154,6 +156,7 @@ public static class ServerEndpoints
             });
         }
 
+        AuditLogger.Add(db, userId, "user", "server.tags_updated", "server", serverId, string.Join(',', normalizedTags), httpContext);
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null)
         {
@@ -166,12 +169,14 @@ public static class ServerEndpoints
     public static async Task<IResult> DeleteServerAsync(
         string serverId,
         ClaimsPrincipal user,
+        HttpContext httpContext,
         NetraDbContext db,
         CancellationToken cancellationToken)
     {
         var userId = CurrentUser.GetId(user);
         var server = await db.Servers
             .Include(item => item.Metrics)
+            .Include(item => item.AlertEvents)
             .Include(item => item.ServerTags)
             .SingleOrDefaultAsync(
                 item => item.Id == serverId && item.OwnerUserId == userId,
@@ -183,6 +188,7 @@ public static class ServerEndpoints
         }
 
         db.Servers.Remove(server);
+        AuditLogger.Add(db, userId, "user", "server.deleted", "server", serverId, server.HostName, httpContext);
         await db.SaveChangesAsync(cancellationToken);
         return Results.NoContent();
     }

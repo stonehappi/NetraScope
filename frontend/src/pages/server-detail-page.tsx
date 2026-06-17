@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MetricChart } from "@/components/servers/metric-chart"
+import { AgentTokenManager } from "@/components/servers/agent-token-manager"
 import { StatusBadge } from "@/components/servers/status-badge"
 import { TagEditor } from "@/components/servers/tag-editor"
 import { UsageMeter } from "@/components/servers/usage-meter"
@@ -148,11 +149,13 @@ export function ServerDetailPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm font-medium">Tags</p>
-            <TagEditor serverId={server.id} />
-          </CardContent>
-        </Card>
+              <p className="text-sm font-medium">Tags</p>
+              <TagEditor serverId={server.id} />
+            </CardContent>
+          </Card>
       )}
+
+      {server && <AgentTokenManager serverId={server.id} />}
 
       {server && (
         <>
@@ -278,7 +281,7 @@ export function ServerDetailPage() {
       {server && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Badge variant="outline">90%+</Badge>
-          CPU or disk usage above 90% triggers a critical alert on the backend.
+          CPU above 90% for 5 minutes, memory above 90%, disk above 85%, or a missing heartbeat triggers a critical alert on the backend.
         </p>
       )}
     </div>

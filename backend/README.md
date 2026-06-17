@@ -109,6 +109,45 @@ curl -X POST http://localhost:5050/api/auth/token/regenerate \
   -H 'Authorization: Bearer YOUR_JWT'
 ```
 
+### Server-scoped agent tokens
+
+For production agents, prefer per-server tokens. They are stored as SHA-256
+hashes, can be rotated or revoked independently, and can optionally be restricted
+to exact source IP addresses.
+
+```sh
+# Create a token for one server.
+curl -X POST http://localhost:5050/api/servers/web-01/tokens \
+  -H 'Authorization: Bearer YOUR_JWT' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"web-01 primary","allowedIpAddresses":["203.0.113.10"]}'
+
+# List token metadata. Full token values are only returned on create/rotate.
+curl http://localhost:5050/api/servers/web-01/tokens \
+  -H 'Authorization: Bearer YOUR_JWT'
+
+# Rotate or revoke one server token.
+curl -X POST http://localhost:5050/api/servers/web-01/tokens/TOKEN_ID/rotate \
+  -H 'Authorization: Bearer YOUR_JWT'
+curl -X DELETE http://localhost:5050/api/servers/web-01/tokens/TOKEN_ID \
+  -H 'Authorization: Bearer YOUR_JWT'
+```
+
+When a server token is used, submitted metric packets must match that token's
+server ID.
+
+## Audit Log
+
+Authenticated users can review recent security events:
+
+```sh
+curl http://localhost:5050/api/audit-logs \
+  -H 'Authorization: Bearer YOUR_JWT'
+```
+
+Events include registration, login success/failure, account token rotation,
+server token create/update/rotate/revoke, tag changes, and server deletion.
+
 ## Server Tags
 
 Tags are managed by the backend and are not sent by agents with every metric.
@@ -129,6 +168,46 @@ curl 'http://localhost:5050/api/servers?tag=production'
 ```
 
 Send an empty array to remove all tags from a server.
+
+## Alerting
+
+The backend stores alert events in `alert_events` and exposes them through:
+
+```sh
+curl 'http://localhost:5050/api/alerts?status=active' \
+  -H 'Authorization: Bearer YOUR_JWT'
+```
+
+Built-in rules are enabled by default:
+
+- `cpu_high_5m`: CPU above 90% for 5 minutes.
+- `memory_high`: memory above 90%.
+- `disk_high`: disk above 85%.
+- `server_offline`: no heartbeat for 2 minutes.
+
+Tune thresholds with configuration keys under `Alerting`, for example:
+
+```sh
+export Alerting__CpuThresholdPct=95
+export Alerting__CpuSustainedMinutes=10
+export Alerting__MemoryThresholdPct=90
+export Alerting__DiskThresholdPct=85
+export Alerting__OfflineMinutes=2
+```
+
+Configure notification targets with:
+
+```sh
+export Alerting__WebhookUrls__0='https://example.com/netrascope-alerts'
+export Alerting__EmailWebhookUrl='https://example.com/email-relay'
+export Alerting__DiscordWebhookUrl='https://discord.com/api/webhooks/...'
+export Alerting__SlackWebhookUrl='https://hooks.slack.com/services/...'
+export Alerting__TelegramBotToken='123456:bot-token'
+export Alerting__TelegramChatId='123456789'
+```
+
+If no target is configured, alerts are still stored and written to the backend
+log.
 
 ## Delete a Server
 

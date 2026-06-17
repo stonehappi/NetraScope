@@ -23,6 +23,7 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.Created, GetStatusCode(result));
@@ -44,6 +45,7 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var result = await AuthEndpoints.RegisterAsync(
@@ -51,6 +53,7 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.Created, GetStatusCode(result));
@@ -67,6 +70,7 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.BadRequest, GetStatusCode(result));
@@ -82,6 +86,7 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var result = await AuthEndpoints.RegisterAsync(
@@ -89,6 +94,7 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.BadRequest, GetStatusCode(result));
@@ -104,12 +110,14 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var result = await AuthEndpoints.LoginAsync(
             new LoginRequest("admin", "correct horse battery"),
             db,
             JwtOptionsAccessor(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.OK, GetStatusCode(result));
@@ -127,12 +135,14 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         var result = await AuthEndpoints.LoginAsync(
             new LoginRequest("admin", "wrong password"),
             db,
             JwtOptionsAccessor(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.Unauthorized, GetStatusCode(result));
@@ -147,11 +157,13 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
         var user = await db.Users.SingleAsync();
 
         var result = await AuthEndpoints.GetMeAsync(
             TestAuth.CreatePrincipal(user.Id),
+            new DefaultHttpContext(),
             db,
             CancellationToken.None);
 
@@ -170,12 +182,14 @@ public sealed class AuthEndpointTests
             db,
             JwtOptionsAccessor(),
             EmptyConfiguration(),
+            new DefaultHttpContext(),
             CancellationToken.None);
         var user = await db.Users.SingleAsync();
         var originalToken = user.IngestionToken;
 
         var result = await AuthEndpoints.RegenerateIngestionTokenAsync(
             TestAuth.CreatePrincipal(user.Id),
+            new DefaultHttpContext(),
             db,
             CancellationToken.None);
 
@@ -196,6 +210,7 @@ public sealed class AuthEndpointTests
             new LoginRequest("missing", "whatever password"),
             db,
             JwtOptionsAccessor(),
+            new DefaultHttpContext(),
             CancellationToken.None);
 
         Assert.Equal((int)HttpStatusCode.Unauthorized, GetStatusCode(result));

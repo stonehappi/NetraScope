@@ -1,5 +1,5 @@
-import { Link, Outlet } from "react-router-dom"
-import { LogOut, Settings } from "lucide-react"
+import { Link, Outlet, useLocation } from "react-router-dom"
+import { Bell, LayoutDashboard, LogOut, Settings } from "lucide-react"
 
 import { BrandLogo } from "@/components/brand-logo"
 import { ModeToggle } from "@/components/mode-toggle"
@@ -19,6 +19,7 @@ import { useAuth } from "@/lib/use-auth"
 
 export function AppLayout() {
   const { username, logout } = useAuth()
+  const location = useLocation()
 
   return (
     <div className="relative min-h-svh overflow-hidden bg-background">
@@ -33,9 +34,29 @@ export function AppLayout() {
             <BrandLogo />
             NetraScope
           </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <Button
+              variant={location.pathname === "/dashboard" ? "secondary" : "ghost"}
+              size="sm"
+              asChild
+            >
+              <Link to="/dashboard" className="gap-2">
+                <LayoutDashboard className="size-4" />
+                <span className="hidden sm:inline">Dashboard</span>
+              </Link>
+            </Button>
+            <Button
+              variant={location.pathname === "/alerts" ? "secondary" : "ghost"}
+              size="sm"
+              asChild
+            >
+              <Link to="/alerts" className="gap-2">
+                <Bell className="size-4" />
+                <span className="hidden sm:inline">Alerts</span>
+              </Link>
+            </Button>
             {username && (
-              <span className="hidden text-sm text-muted-foreground sm:inline">{username}</span>
+              <span className="hidden pl-2 text-sm text-muted-foreground md:inline">{username}</span>
             )}
             <Button variant="ghost" size="icon" asChild aria-label="Settings">
               <Link to="/settings">

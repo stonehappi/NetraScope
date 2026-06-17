@@ -23,6 +23,7 @@ public sealed class ServerEndpointTests
             "server-01",
             new ReplaceServerTagsRequest([" Production ", "LINUX", "production"]),
             TestAuth.CreatePrincipal(TestUserId),
+            new DefaultHttpContext(),
             db,
             CancellationToken.None);
 
@@ -48,6 +49,7 @@ public sealed class ServerEndpointTests
             "server-02",
             new ReplaceServerTagsRequest(["database"]),
             TestAuth.CreatePrincipal(TestUserId),
+            new DefaultHttpContext(),
             db,
             CancellationToken.None);
 
@@ -76,6 +78,7 @@ public sealed class ServerEndpointTests
             "server-03",
             new ReplaceServerTagsRequest([]),
             TestAuth.CreatePrincipal(TestUserId),
+            new DefaultHttpContext(),
             db,
             CancellationToken.None);
 
@@ -121,12 +124,14 @@ public sealed class ServerEndpointTests
             "server-04",
             new ReplaceServerTagsRequest([""]),
             TestAuth.CreatePrincipal(TestUserId),
+            new DefaultHttpContext(),
             db,
             CancellationToken.None);
         var missingResult = await ServerEndpoints.ReplaceServerTagsAsync(
             "missing-server",
             new ReplaceServerTagsRequest(["production"]),
             TestAuth.CreatePrincipal(TestUserId),
+            new DefaultHttpContext(),
             db,
             CancellationToken.None);
 
@@ -160,6 +165,7 @@ public sealed class ServerEndpointTests
         var result = await ServerEndpoints.DeleteServerAsync(
             "server-05",
             TestAuth.CreatePrincipal(TestUserId),
+            new DefaultHttpContext(),
             db,
             CancellationToken.None);
 
@@ -180,6 +186,7 @@ public sealed class ServerEndpointTests
         var result = await ServerEndpoints.DeleteServerAsync(
             "server-06",
             TestAuth.CreatePrincipal(TestUserId),
+            new DefaultHttpContext(),
             db,
             CancellationToken.None);
 

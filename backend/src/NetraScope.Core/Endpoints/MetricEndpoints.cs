@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using NetraScope.Core.Alerting;
 using NetraScope.Core.Auth;
 using NetraScope.Core.Contracts;
 using NetraScope.Core.Data;
@@ -22,6 +23,7 @@ public static class MetricEndpoints
             .WithName("IngestMetric")
             .WithSummary("Stores one or more server metric packets")
             .AllowAnonymous()
+            .RequireRateLimiting(RateLimitPolicies.Metrics)
             .AddEndpointFilter<IngestionTokenFilter>()
             .Produces(StatusCodes.Status202Accepted)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -76,6 +78,7 @@ public static class MetricEndpoints
         [FromBody] JsonElement payload,
         HttpContext httpContext,
         NetraDbContext db,
+        IAlertingService alerting,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
@@ -94,7 +97,13 @@ public static class MetricEndpoints
 
         var receivedAt = DateTimeOffset.UtcNow;
         var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString();
-        var ownerUserId = (Guid)httpContext.Items[IngestionTokenFilter.OwnerUserIdKey]!;
+        var tokenContext = (IngestionTokenContext)httpContext.Items[IngestionTokenFilter.TokenContextKey]!;
+        var ownerUserId = tokenContext.OwnerUserId;
+        if (tokenContext.ServerId is not null &&
+            packets.Any(packet => packet.ServerId != tokenContext.ServerId))
+        {
+            return Results.Unauthorized();
+        }
         var isNpgsql = db.Database.IsNpgsql();
         await using var transaction = isNpgsql
             ? await db.Database.BeginTransactionAsync(cancellationToken)
@@ -143,6 +152,22 @@ public static class MetricEndpoints
         if (transaction is not null)
         {
             await transaction.CommitAsync(cancellationToken);
+        }
+
+        if (tokenContext.AgentTokenId is not null)
+        {
+            await db.AgentTokens
+                .Where(token => token.Id == tokenContext.AgentTokenId)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(
+                        token => token.LastUsedAt,
+                        DateTimeOffset.UtcNow),
+                    cancellationToken);
+        }
+
+        foreach (var packet in packets)
+        {
+            await alerting.EvaluateMetricAsync(packet, ownerUserId, cancellationToken);
         }
 
         foreach (var packet in packets.Where(packet => packet.CpuUsagePct > 90.0f))

@@ -10,6 +10,7 @@ using NetraScope.Core.Auth;
 using NetraScope.Core.Contracts;
 using NetraScope.Core.Data;
 using NetraScope.Core.Entities;
+using NetraScope.Core.Security;
 
 namespace NetraScope.Core.Endpoints;
 
@@ -65,6 +66,7 @@ public static class AuthEndpoints
         NetraDbContext db,
         IOptions<JwtOptions> jwtOptions,
         IConfiguration configuration,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         // Registration is open by default but can be disabled on private
@@ -106,6 +108,7 @@ public static class AuthEndpoints
         user.PasswordHash = hasher.HashPassword(user, request.Password);
 
         db.Users.Add(user);
+        AuditLogger.Add(db, user.Id, "user", "auth.registered", "user", user.Id.ToString(), user.Username, httpContext);
         await db.SaveChangesAsync(cancellationToken);
 
         var response = CreateAuthResponse(user, jwtOptions.Value);
@@ -116,6 +119,7 @@ public static class AuthEndpoints
         [FromBody] LoginRequest request,
         NetraDbContext db,
         IOptions<JwtOptions> jwtOptions,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var normalizedUsername = request.Username.Trim();
@@ -134,20 +138,27 @@ public static class AuthEndpoints
                 new User { Username = string.Empty, PasswordHash = string.Empty, IngestionToken = string.Empty },
                 DummyPasswordHash,
                 request.Password);
+            AuditLogger.Add(db, null, "anonymous", "auth.login_failed", "user", null, normalizedUsername, httpContext);
+            await db.SaveChangesAsync(cancellationToken);
             return Results.Unauthorized();
         }
 
         var verification = hasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
         if (verification == PasswordVerificationResult.Failed)
         {
+            AuditLogger.Add(db, user.Id, "anonymous", "auth.login_failed", "user", user.Id.ToString(), user.Username, httpContext);
+            await db.SaveChangesAsync(cancellationToken);
             return Results.Unauthorized();
         }
 
+        AuditLogger.Add(db, user.Id, "user", "auth.login_succeeded", "user", user.Id.ToString(), user.Username, httpContext);
+        await db.SaveChangesAsync(cancellationToken);
         return Results.Ok(CreateAuthResponse(user, jwtOptions.Value));
     }
 
     public static async Task<IResult> GetMeAsync(
         ClaimsPrincipal currentUser,
+        HttpContext httpContext,
         NetraDbContext db,
         CancellationToken cancellationToken)
     {
@@ -158,12 +169,14 @@ public static class AuthEndpoints
 
     public static async Task<IResult> RegenerateIngestionTokenAsync(
         ClaimsPrincipal currentUser,
+        HttpContext httpContext,
         NetraDbContext db,
         CancellationToken cancellationToken)
     {
         var userId = CurrentUser.GetId(currentUser);
         var user = await db.Users.SingleAsync(u => u.Id == userId, cancellationToken);
         user.IngestionToken = IngestionTokenGenerator.Generate();
+        AuditLogger.Add(db, userId, "user", "account_token.rotated", "user", userId.ToString(), "Account-wide ingestion token rotated.", httpContext);
         await db.SaveChangesAsync(cancellationToken);
         return Results.Ok(new MeResponse(user.Username, user.IngestionToken));
     }

@@ -2,7 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
+using NetraScope.Core.Alerting;
 using NetraScope.Core.Auth;
 using NetraScope.Core.Contracts;
 using NetraScope.Core.Data;
@@ -249,15 +249,35 @@ public sealed class MetricEndpointTests
         Guid? ownerUserId = null)
     {
         var httpContext = new DefaultHttpContext();
-        httpContext.Items[IngestionTokenFilter.OwnerUserIdKey] =
-            ownerUserId ?? TestOwnerUserId;
+        var resolvedOwnerUserId = ownerUserId ?? TestOwnerUserId;
+        httpContext.Items[IngestionTokenFilter.OwnerUserIdKey] = resolvedOwnerUserId;
+        httpContext.Items[IngestionTokenFilter.TokenContextKey] = new IngestionTokenContext(
+            resolvedOwnerUserId,
+            AgentTokenId: null,
+            ServerId: null,
+            IsServerScoped: false);
 
         return MetricEndpoints.IngestMetricAsync(
             payload,
             httpContext,
             db,
-            NullLogger<Program>.Instance,
+            NoopAlertingService.Instance,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Program>.Instance,
             CancellationToken.None);
+    }
+
+    private sealed class NoopAlertingService : IAlertingService
+    {
+        public static readonly NoopAlertingService Instance = new();
+
+        public Task EvaluateMetricAsync(
+            MetricPacket packet,
+            Guid ownerUserId,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+
+        public Task EvaluateOfflineServersAsync(CancellationToken cancellationToken) =>
+            Task.CompletedTask;
     }
 
     private static int? GetStatusCode(IResult result) =>

@@ -12,8 +12,8 @@ Go agents ──HTTPS──┐
 React dashboard ───┘
 ```
 
-Config lives in [`wrangler.d1.jsonc`](wrangler.d1.jsonc); the schema is
-[`migrations/0001_initial.sql`](migrations/0001_initial.sql).
+Config lives in [`wrangler.d1.jsonc`](wrangler.d1.jsonc); schema migrations are
+stored in [`migrations/`](migrations/).
 
 ---
 
@@ -69,6 +69,7 @@ Non-secret vars are in `wrangler.d1.jsonc` under `vars` — edit them before dep
 | `ALLOW_REGISTRATION` | `false` disables public sign-up (recommended once your accounts exist). Default `true`. |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | Token issuer/audience, default `NetraScope`. |
 | `JWT_EXPIRY_MINUTES` | Session lifetime, default `60`. |
+| `ALERT_*` | Built-in alert thresholds, offline window, and optional comma-separated webhook URLs. |
 
 The signing secret is a **Wrangler secret**, never committed:
 
@@ -87,7 +88,7 @@ npx wrangler secret put JWT_SECRET --config wrangler.d1.jsonc
 ## 5. Migrate and deploy
 
 ```sh
-npm run migrate:d1:remote      # apply migrations/0001_initial.sql to production D1
+npm run migrate:d1:remote      # apply all pending D1 migrations
 npm run check                  # type-check
 npm run dry-run:d1             # validate the deploy without publishing
 npm run deploy:d1              # publish the Worker
