@@ -1,8 +1,7 @@
 # Deploy the NetraScope frontend with nginx
 
 Full setup for building the React dashboard and serving it as a static SPA
-behind nginx, with nginx reverse-proxying `/api` to the backend (the IIS .NET
-API or the Cloudflare Worker).
+behind nginx, with nginx reverse-proxying `/api` to the .NET backend.
 
 ```text
 Browser ──HTTPS──► nginx (this guide)
@@ -36,7 +35,7 @@ Choose how the SPA reaches the API:
   VITE_API_BASE_URL="https://api.example.com" npm run build
   ```
   This requires the backend's CORS allow-list to include the dashboard origin
-  (`AllowedHosts` on IIS, `FRONTEND_ORIGIN` on the Worker).
+  (`AllowedHosts` on IIS).
 
 The build output is `frontend/dist/`.
 
@@ -60,8 +59,7 @@ sudo nginx -t && sudo systemctl reload nginx
 ```
 
 Set `root` to `/var/www/netrascope` and replace `BACKEND_HOST:BACKEND_PORT`
-with your backend's address (e.g. an IIS box at `192.168.1.50:5050`, or a
-Worker via a Cloudflare Tunnel — see `cloudflared-config.yml`).
+with your backend's address (e.g. an IIS box at `192.168.1.50:5050`).
 
 ---
 

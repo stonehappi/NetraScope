@@ -52,9 +52,7 @@ server details, or other sensitive information.
 - Optional webhook notifications for email relays, Telegram, Discord, Slack,
   and custom receivers.
 - Light, dark, and system themes.
-- Two backend choices:
-  - ASP.NET Core with PostgreSQL for conventional or Docker hosting.
-  - Cloudflare Workers with D1 or Supabase for serverless hosting.
+- ASP.NET Core backend with PostgreSQL for conventional or Docker hosting.
 
 ## Architecture
 
@@ -66,7 +64,6 @@ Monitored server
         v
   Backend API
     - ASP.NET Core + PostgreSQL
-    - Cloudflare Worker + D1/Supabase
         |
         | authenticated REST API
         v
@@ -130,7 +127,6 @@ The Docker stack is configured through `.env` (see `.env.example`):
 | `ALERT_SLACK_WEBHOOK_URL` | Optional Slack webhook for alert notifications |
 | `ALERT_TELEGRAM_BOT_TOKEN` | Optional Telegram bot token for alert notifications |
 | `ALERT_TELEGRAM_CHAT_ID` | Telegram chat ID that receives alert messages |
-| `FRONTEND_ORIGIN` | Used only by the Cloudflare Worker backend via wrangler vars, not by Docker Compose |
 
 Changes to `VITE_API_BASE_URL` require rebuilding the frontend image
 (`docker compose build frontend`). All other values apply on the next
@@ -212,25 +208,9 @@ go run ./cmd/netrascope-agent \
   -token YOUR_INGESTION_TOKEN
 ```
 
-### Cloudflare Worker Backend
-
-The Worker backend implements the same API as the .NET backend. It supports
-Cloudflare D1 and Supabase:
-
-```sh
-cd worker-backend
-npm install
-cp .dev.vars.d1.example .dev.vars
-npm run migrate:d1:local
-npm run dev:d1
-```
-
-See the [Worker deployment guide](worker-backend/README.md) for D1, Supabase,
-secrets, migrations, and production deployment.
-
 ## Alerting
 
-Both backend implementations create persisted alert events and expose them at
+The backend creates persisted alert events and exposes them at
 `GET /api/alerts` for authenticated users. Add `?status=active` or
 `?status=resolved` to filter the latest 100 events.
 
@@ -267,15 +247,6 @@ export Alerting__TelegramBotToken='123456:bot-token'
 export Alerting__TelegramChatId='123456789'
 ```
 
-For the Cloudflare Worker backend, store the targets as secrets:
-
-```sh
-wrangler secret put ALERT_DISCORD_WEBHOOK_URL
-wrangler secret put ALERT_SLACK_WEBHOOK_URL
-wrangler secret put ALERT_TELEGRAM_BOT_TOKEN
-wrangler secret put ALERT_TELEGRAM_CHAT_ID
-```
-
 Generic webhook and email relay targets receive the alert JSON payload. Discord,
 Slack, and Telegram targets receive their native simple message format.
 
@@ -288,7 +259,6 @@ dotnet test NetraScope.slnx
 
 cd agent && go test ./...
 cd ../frontend && npm run lint && npm run build
-cd ../worker-backend && npm run check
 ```
 
 ## Repository Layout
@@ -298,7 +268,6 @@ cd ../worker-backend && npm run check
 | `agent/` | Go metric collector and cross-platform service manager |
 | `backend/` | ASP.NET Core API, PostgreSQL entities, migrations, and tests |
 | `frontend/` | React, TypeScript, Vite, Tailwind CSS, and shadcn/ui dashboard |
-| `worker-backend/` | Cloudflare Worker API with D1 and Supabase adapters |
 | `deploy/` | Cross-platform full-stack deployment scripts |
 | `proxy/` | Nginx reverse-proxy configuration |
 | `docker-compose.yml` | Local and self-hosted application stack |
@@ -360,15 +329,12 @@ research.
 - [Agent usage](agent/docs/USAGE.md)
 - [Agent release builds](agent/docs/BUILD.md)
 - [Docker deployment](deploy/README.md)
-- [Cloudflare Worker backend](worker-backend/README.md)
 
 ### Production deployment guides
 
-- **[Recommended production path](DEPLOYMENT.md)** — Cloudflare Pages, Worker/D1,
-  and GitHub Releases, end to end.
+- **[Docker deployment](deploy/README.md)** — the recommended self-hosted path.
 - [Backend on IIS](backend/deploy/deploy.iis.md)
 - [Frontend with nginx](frontend/deploy/deploy.nginx.md)
-- [Worker backend on Cloudflare D1](worker-backend/deploy.d1.md)
 
 ## License
 
