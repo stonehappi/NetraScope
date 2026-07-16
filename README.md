@@ -115,6 +115,27 @@ If Go is not installed, start the stack without rebuilding agent binaries:
 Before exposing NetraScope publicly, replace the development database password
 and JWT secret in `.env`.
 
+### Docker environment variables
+
+The Docker stack is configured through `.env` (see `.env.example`):
+
+| Variable | Purpose |
+| --- | --- |
+| `POSTGRES_PASSWORD` | PostgreSQL password used by the db, migrate, and backend services |
+| `JWT_SECRET` | JWT signing secret, at least 32 random characters |
+| `PROXY_PORT` | Host port for the reverse proxy, the single entry point for the frontend and API |
+| `VITE_API_BASE_URL` | Leave empty so the dashboard calls the API through the proxy with relative paths. An absolute URL is baked into the frontend build and breaks access from other hosts |
+| `ALERT_WEBHOOK_URL` | Optional generic webhook target for alert notifications |
+| `ALERT_DISCORD_WEBHOOK_URL` | Optional Discord webhook for alert notifications |
+| `ALERT_SLACK_WEBHOOK_URL` | Optional Slack webhook for alert notifications |
+| `ALERT_TELEGRAM_BOT_TOKEN` | Optional Telegram bot token for alert notifications |
+| `ALERT_TELEGRAM_CHAT_ID` | Telegram chat ID that receives alert messages |
+| `FRONTEND_ORIGIN` | Used only by the Cloudflare Worker backend via wrangler vars, not by Docker Compose |
+
+Changes to `VITE_API_BASE_URL` require rebuilding the frontend image
+(`docker compose build frontend`). All other values apply on the next
+`docker compose up -d`.
+
 ## Connect A Server
 
 Download the agent for the server's operating system from the latest GitHub
@@ -221,17 +242,34 @@ Default rules:
 - Server offline for 2 minutes.
 
 Notifications are optional. Without a configured target, alerts are stored and
-logged. Configure one or more targets with environment variables:
+logged. Configure one or more targets with environment variables.
+
+For the Docker stack, set the targets in `.env` and restart the backend:
 
 ```sh
-# ASP.NET Core
+# .env
+ALERT_WEBHOOK_URL=https://example.com/netrascope-alerts
+ALERT_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+ALERT_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+ALERT_TELEGRAM_BOT_TOKEN=123456:bot-token
+ALERT_TELEGRAM_CHAT_ID=123456789
+
+docker compose up -d backend
+```
+
+For a bare ASP.NET Core backend, use the configuration keys directly:
+
+```sh
 export Alerting__WebhookUrls__0='https://example.com/netrascope-alerts'
 export Alerting__DiscordWebhookUrl='https://discord.com/api/webhooks/...'
 export Alerting__SlackWebhookUrl='https://hooks.slack.com/services/...'
 export Alerting__TelegramBotToken='123456:bot-token'
 export Alerting__TelegramChatId='123456789'
+```
 
-# Cloudflare Worker
+For the Cloudflare Worker backend, store the targets as secrets:
+
+```sh
 wrangler secret put ALERT_DISCORD_WEBHOOK_URL
 wrangler secret put ALERT_SLACK_WEBHOOK_URL
 wrangler secret put ALERT_TELEGRAM_BOT_TOKEN

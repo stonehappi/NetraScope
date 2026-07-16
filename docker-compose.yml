@@ -40,6 +40,11 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ConnectionStrings__NetraScope: Host=db;Port=5432;Database=netrascope;Username=postgres;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       Auth__Jwt__Secret: ${JWT_SECRET:?JWT_SECRET must be set in .env to a long random value}
+      Alerting__WebhookUrls__0: ${ALERT_WEBHOOK_URL:-}
+      Alerting__DiscordWebhookUrl: ${ALERT_DISCORD_WEBHOOK_URL:-}
+      Alerting__SlackWebhookUrl: ${ALERT_SLACK_WEBHOOK_URL:-}
+      Alerting__TelegramBotToken: ${ALERT_TELEGRAM_BOT_TOKEN:-}
+      Alerting__TelegramChatId: ${ALERT_TELEGRAM_CHAT_ID:-}
     depends_on:
       db:
         condition: service_healthy
