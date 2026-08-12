@@ -18,6 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MetricChart } from "@/components/servers/metric-chart"
@@ -31,6 +32,14 @@ import { formatBytes, formatBytesPerSecond, formatChartTime, formatRelativeTime 
 import type { MetricPoint } from "@/types/api"
 
 const EMPTY_POINTS: MetricPoint[] = []
+const CUSTOM_RANGE_VALUE = "custom"
+
+function formatDateTimeLocal(date: Date) {
+  const pad = (value: number) => value.toString().padStart(2, "0")
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`
+}
 
 const TIME_RANGES = [
   { value: "15", label: "15m" },
@@ -39,6 +48,8 @@ const TIME_RANGES = [
   { value: "1440", label: "24h" },
   { value: "10080", label: "7d" },
   { value: "43200", label: "30d" },
+  { value: "525600", label: "1y" },
+  { value: CUSTOM_RANGE_VALUE, label: "Custom" },
 ]
 
 export function ServerDetailPage() {
@@ -46,6 +57,17 @@ export function ServerDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [range, setRange] = useState("60")
+  const [customFrom, setCustomFrom] = useState(() =>
+    formatDateTimeLocal(new Date(Date.now() - 1000 * 60 * 60 * 24 * 7)),
+  )
+  const [customTo, setCustomTo] = useState(() => formatDateTimeLocal(new Date()))
+
+  const isCustomRange = range === CUSTOM_RANGE_VALUE
+  const customRangeValid =
+    isCustomRange &&
+    customFrom.length > 0 &&
+    customTo.length > 0 &&
+    new Date(customFrom) < new Date(customTo)
 
   const serversQuery = useQuery({
     queryKey: ["servers"],
@@ -53,9 +75,12 @@ export function ServerDetailPage() {
   })
 
   const metricsQuery = useQuery({
-    queryKey: ["server-metrics", serverId, range],
-    queryFn: () => getServerMetrics(serverId, Number(range)),
-    enabled: serverId.length > 0,
+    queryKey: ["server-metrics", serverId, range, customFrom, customTo],
+    queryFn: () =>
+      isCustomRange
+        ? getServerMetrics(serverId, customFrom, customTo)
+        : getServerMetrics(serverId, Number(range)),
+    enabled: serverId.length > 0 && (!isCustomRange || customRangeValid),
   })
 
   const server = serversQuery.data?.find((item) => item.id === serverId)
@@ -78,7 +103,7 @@ export function ServerDetailPage() {
 
   const chartData = useMemo(
     () => {
-      const includeDate = Number(range) > 1440
+      const includeDate = range === CUSTOM_RANGE_VALUE || Number(range) > 1440
       return points.map((point) => ({
         time: formatChartTime(point.timestamp, includeDate),
         cpu: Number(point.cpuUsagePct.toFixed(1)),
@@ -233,6 +258,39 @@ export function ServerDetailPage() {
               </TabsList>
             </Tabs>
           </div>
+
+          {isCustomRange && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label htmlFor="custom-from" className="text-sm font-medium text-muted-foreground">
+                  Start
+                </label>
+                <Input
+                  id="custom-from"
+                  type="datetime-local"
+                  value={customFrom}
+                  onChange={(event) => setCustomFrom(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="custom-to" className="text-sm font-medium text-muted-foreground">
+                  End
+                </label>
+                <Input
+                  id="custom-to"
+                  type="datetime-local"
+                  value={customTo}
+                  onChange={(event) => setCustomTo(event.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          {isCustomRange && !customRangeValid && (
+            <p className="text-sm text-muted-foreground">
+              Pick a valid start and end date before the chart will refresh.
+            </p>
+          )}
 
           {metricsQuery.isLoading ? (
             <div className="grid gap-4 sm:grid-cols-2">

@@ -72,9 +72,27 @@ export function getServers(tag?: string): Promise<ServerSummary[]> {
   return request<ServerSummary[]>(`/api/servers${query}`)
 }
 
-export function getServerMetrics(serverId: string, minutes: number): Promise<MetricPoint[]> {
+export function getServerMetrics(serverId: string, minutes: number): Promise<MetricPoint[]>
+export function getServerMetrics(serverId: string, from: string, to: string): Promise<MetricPoint[]>
+export function getServerMetrics(
+  serverId: string,
+  minutesOrFrom: number | string,
+  to?: string,
+): Promise<MetricPoint[]> {
+  if (typeof minutesOrFrom === "number") {
+    return request<MetricPoint[]>(
+      `/api/servers/${encodeURIComponent(serverId)}/metrics?minutes=${minutesOrFrom}`,
+    )
+  }
+
+  if (to === undefined) {
+    throw new Error("getServerMetrics requires both from and to for custom ranges")
+  }
+
   return request<MetricPoint[]>(
-    `/api/servers/${encodeURIComponent(serverId)}/metrics?minutes=${minutes}`,
+    `/api/servers/${encodeURIComponent(serverId)}/metrics?from=${encodeURIComponent(
+      minutesOrFrom,
+    )}&to=${encodeURIComponent(to)}`,
   )
 }
 

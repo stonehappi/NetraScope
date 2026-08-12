@@ -200,6 +200,8 @@ public sealed class MetricEndpointTests
         var result = await MetricEndpoints.GetServerMetricsAsync(
             "missing-server",
             minutes: null,
+            from: null,
+            to: null,
             TestAuth.CreatePrincipal(TestOwnerUserId),
             db,
             CancellationToken.None);
@@ -229,6 +231,41 @@ public sealed class MetricEndpointTests
         var result = await MetricEndpoints.GetServerMetricsAsync(
             "server-04",
             minutes: 60,
+            from: null,
+            to: null,
+            TestAuth.CreatePrincipal(TestOwnerUserId),
+            db,
+            CancellationToken.None);
+
+        Assert.Equal((int)HttpStatusCode.OK, GetStatusCode(result));
+        var points = Assert.IsType<MetricPoint[]>(GetValue(result));
+        Assert.Equal([20f, 30f], points.Select(point => point.CpuUsagePct));
+    }
+
+    [Fact]
+    public async Task GetServerMetricsReturnsPointsForCustomDateRange()
+    {
+        await using var db = CreateDbContext();
+        db.Servers.Add(new Server
+        {
+            Id = "server-04",
+            HostName = "server-04",
+            LastHeartbeatAt = DateTimeOffset.UtcNow,
+            OwnerUserId = TestOwnerUserId,
+        });
+
+        var now = DateTimeOffset.UtcNow;
+        db.PerformanceMetrics.AddRange(
+            NewMetric("server-04", now.AddHours(-3), cpu: 10),
+            NewMetric("server-04", now.AddHours(-2), cpu: 20),
+            NewMetric("server-04", now.AddHours(-1), cpu: 30));
+        await db.SaveChangesAsync();
+
+        var result = await MetricEndpoints.GetServerMetricsAsync(
+            "server-04",
+            minutes: null,
+            from: now.AddHours(-2),
+            to: now.AddHours(-1),
             TestAuth.CreatePrincipal(TestOwnerUserId),
             db,
             CancellationToken.None);

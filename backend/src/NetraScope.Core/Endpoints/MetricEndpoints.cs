@@ -44,6 +44,8 @@ public static class MetricEndpoints
     public static async Task<IResult> GetServerMetricsAsync(
         string serverId,
         [FromQuery] int? minutes,
+        [FromQuery] DateTimeOffset? from,
+        [FromQuery] DateTimeOffset? to,
         ClaimsPrincipal user,
         NetraDbContext db,
         CancellationToken cancellationToken)
@@ -56,16 +58,54 @@ public static class MetricEndpoints
             return Results.NotFound();
         }
 
-        var window = Math.Clamp(minutes ?? DefaultHistoryMinutes, 1, MetricResolution.MaxWindowMinutes);
-        var since = DateTimeOffset.UtcNow.AddMinutes(-window);
-        var granularity = MetricResolution.GranularityForWindow(window);
+        DateTimeOffset since;
+        DateTimeOffset until;
+        if (from.HasValue || to.HasValue)
+        {
+            if (!from.HasValue || !to.HasValue)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["range"] = ["Custom range requires both from and to datetimes."],
+                });
+            }
+
+            if (from.Value >= to.Value)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["range"] = ["Custom range must have a start before the end."],
+                });
+            }
+
+            var window = (int)Math.Ceiling((to.Value - from.Value).TotalMinutes);
+            if (window > MetricResolution.MaxWindowMinutes)
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["range"] = ["Custom range cannot exceed one year."],
+                });
+            }
+
+            since = from.Value;
+            until = to.Value;
+        }
+        else
+        {
+            var window = Math.Clamp(minutes ?? DefaultHistoryMinutes, 1, MetricResolution.MaxWindowMinutes);
+            since = DateTimeOffset.UtcNow.AddMinutes(-window);
+            until = DateTimeOffset.UtcNow;
+        }
+
+        var windowMinutes = (int)Math.Ceiling((until - since).TotalMinutes);
+        var granularity = MetricResolution.GranularityForWindow(windowMinutes);
 
         // Short windows read raw samples; longer windows read downsampled rollups
         // so charts stay fast and pruned raw data does not leave gaps.
         var points = granularity is null
             ? await db.PerformanceMetrics
                 .AsNoTracking()
-                .Where(metric => metric.ServerId == serverId && metric.Timestamp >= since)
+                .Where(metric => metric.ServerId == serverId && metric.Timestamp >= since && metric.Timestamp <= until)
                 .OrderBy(metric => metric.Timestamp)
                 .Select(metric => new MetricPoint(
                     metric.Timestamp,
@@ -79,7 +119,8 @@ public static class MetricEndpoints
                 .AsNoTracking()
                 .Where(rollup => rollup.ServerId == serverId
                     && rollup.Granularity == granularity
-                    && rollup.BucketStart >= since)
+                    && rollup.BucketStart >= since
+                    && rollup.BucketStart <= until)
                 .OrderBy(rollup => rollup.BucketStart)
                 .Select(rollup => new MetricPoint(
                     rollup.BucketStart,
