@@ -14,6 +14,8 @@ public sealed class AlertingOptions
 
     public double DiskThresholdPct { get; init; } = 85;
 
+    public double CpuTempThresholdC { get; init; } = 85;
+
     public int OfflineMinutes { get; init; } = 2;
 
     public string[] WebhookUrls { get; init; } = [];

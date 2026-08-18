@@ -19,6 +19,10 @@ export function formatPercent(value: number, decimals = 1): string {
   return `${value.toFixed(decimals)}%`
 }
 
+export function formatTemperature(celsius: number, decimals = 1): string {
+  return `${celsius.toFixed(decimals)}°C`
+}
+
 const RELATIVE_TIME_UNITS: { unit: Intl.RelativeTimeFormatUnit; seconds: number }[] = [
   { unit: "year", seconds: 31536000 },
   { unit: "month", seconds: 2592000 },

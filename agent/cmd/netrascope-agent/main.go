@@ -26,6 +26,7 @@ import (
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/mem"
 	gopsutilnet "github.com/shirou/gopsutil/v4/net"
+	"github.com/shirou/gopsutil/v4/sensors"
 	_ "modernc.org/sqlite"
 )
 
@@ -67,6 +68,7 @@ type metricPacket struct {
 	MemoryTotalBytes   uint64    `json:"memoryTotalBytes"`
 	DiskUtilizationPct float64   `json:"diskUtilizationPct"`
 	NetworkInBytesSec  int64     `json:"networkInBytesSec"`
+	CPUTempC           *float64  `json:"cpuTempC,omitempty"`
 }
 
 type networkSample struct {
@@ -576,7 +578,89 @@ func collectMetric(ctx context.Context, serverID string, previous networkSample)
 		MemoryTotalBytes:   memory.Total,
 		DiskUtilizationPct: diskUsage.UsedPercent,
 		NetworkInBytesSec:  networkReceiveRate(previous, currentNetwork),
+		CPUTempC:           collectCPUTemperature(ctx),
 	}, currentNetwork, nil
+}
+
+func collectCPUTemperature(ctx context.Context) *float64 {
+	temps, err := sensors.TemperaturesWithContext(ctx)
+	if err == nil && len(temps) > 0 {
+		var cpuTemps []float64
+		var allTemps []float64
+		for _, stat := range temps {
+			if stat.Temperature <= 0 || stat.Temperature > 150 {
+				continue
+			}
+			allTemps = append(allTemps, stat.Temperature)
+			key := strings.ToLower(stat.SensorKey)
+			if strings.Contains(key, "cpu") ||
+				strings.Contains(key, "core") ||
+				strings.Contains(key, "package") ||
+				strings.Contains(key, "k10temp") ||
+				strings.Contains(key, "coretemp") ||
+				strings.Contains(key, "zenpower") ||
+				strings.Contains(key, "soc") ||
+				strings.Contains(key, "thermal_zone") ||
+				strings.Contains(key, "acpitz") {
+				cpuTemps = append(cpuTemps, stat.Temperature)
+			}
+		}
+
+		candidates := cpuTemps
+		if len(candidates) == 0 {
+			candidates = allTemps
+		}
+		if len(candidates) > 0 {
+			var maxTemp float64
+			for _, t := range candidates {
+				if t > maxTemp {
+					maxTemp = t
+				}
+			}
+			return &maxTemp
+		}
+	}
+
+	if runtime.GOOS == "linux" {
+		if temp := readLinuxThermalZone(); temp != nil {
+			return temp
+		}
+	}
+
+	return nil
+}
+
+func readLinuxThermalZone() *float64 {
+	matches, err := filepath.Glob("/sys/class/thermal/thermal_zone*/temp")
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+	var maxTemp float64
+	found := false
+	for _, match := range matches {
+		data, err := os.ReadFile(match)
+		if err != nil {
+			continue
+		}
+		raw := strings.TrimSpace(string(data))
+		val, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			continue
+		}
+		if val > 1000 {
+			val /= 1000.0
+		}
+		if val > 0 && val <= 150 {
+			if !found || val > maxTemp {
+				maxTemp = val
+				found = true
+			}
+		}
+	}
+	if found {
+		return &maxTemp
+	}
+	return nil
 }
 
 func rootDiskPath() string {

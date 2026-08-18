@@ -18,5 +18,7 @@ public sealed class PerformanceMetric
 
     public long NetworkInBytesSec { get; init; }
 
+    public float? CpuTempC { get; init; }
+
     public Server? Server { get; init; }
 }

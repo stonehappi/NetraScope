@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Trash2 } from "lucide-react"
+import { ArrowLeft, Thermometer, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -28,7 +28,7 @@ import { StatusBadge } from "@/components/servers/status-badge"
 import { TagEditor } from "@/components/servers/tag-editor"
 import { UsageMeter } from "@/components/servers/usage-meter"
 import { ApiError, deleteServer, getServerMetrics, getServers } from "@/lib/api"
-import { formatBytes, formatBytesPerSecond, formatChartTime, formatRelativeTime } from "@/lib/format"
+import { formatBytes, formatBytesPerSecond, formatChartTime, formatRelativeTime, formatTemperature } from "@/lib/format"
 import type { MetricPoint } from "@/types/api"
 
 const EMPTY_POINTS: MetricPoint[] = []
@@ -86,6 +86,7 @@ export function ServerDetailPage() {
   const server = serversQuery.data?.find((item) => item.id === serverId)
   const points = metricsQuery.data ?? EMPTY_POINTS
   const latest = points.at(-1)
+  const hasTemperature = points.some((point) => point.cpuTempC != null)
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteServer(serverId),
@@ -110,6 +111,7 @@ export function ServerDetailPage() {
         memory: Number(((point.memoryUsedBytes / point.memoryTotalBytes) * 100).toFixed(1)),
         disk: Number(point.diskUtilizationPct.toFixed(1)),
         network: Number((point.networkInBytesSec / 1024).toFixed(1)),
+        temperature: point.cpuTempC != null ? Number(point.cpuTempC.toFixed(1)) : null,
       }))
     },
     [points, range],
@@ -189,7 +191,7 @@ export function ServerDetailPage() {
 
       {server && (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">CPU</CardTitle>
@@ -244,6 +246,32 @@ export function ServerDetailPage() {
                 )}
               </CardContent>
             </Card>
+            {latest?.cpuTempC != null && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">CPU Temp</CardTitle>
+                    <Thermometer className="size-4 text-muted-foreground" />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1">
+                    <p className={`text-2xl font-semibold tabular-nums ${
+                      latest.cpuTempC >= 85
+                        ? "text-destructive"
+                        : latest.cpuTempC >= 70
+                          ? "text-amber-500"
+                          : ""
+                    }`}>
+                      {formatTemperature(latest.cpuTempC, 1)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {latest.cpuTempC >= 85 ? "Critical heat" : latest.cpuTempC >= 70 ? "Warm" : "Normal thermal"}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="flex items-center justify-between">
@@ -298,6 +326,7 @@ export function ServerDetailPage() {
               <Skeleton className="h-70 w-full" />
               <Skeleton className="h-70 w-full" />
               <Skeleton className="h-70 w-full" />
+              {hasTemperature && <Skeleton className="h-70 w-full sm:col-span-2" />}
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
@@ -336,6 +365,18 @@ export function ServerDetailPage() {
                 color="var(--chart-4)"
                 tickFormatter={(value) => `${value} KB/s`}
               />
+              {hasTemperature && (
+                <div className="sm:col-span-2">
+                  <MetricChart
+                    title="CPU Temperature"
+                    description="Hardware thermal sensor readings (°C)"
+                    data={chartData.filter((d) => d.temperature !== null)}
+                    dataKey="temperature"
+                    color="hsl(24, 95%, 53%)"
+                    tickFormatter={(value) => `${value}°C`}
+                  />
+                </div>
+              )}
             </div>
           )}
         </>
@@ -345,8 +386,8 @@ export function ServerDetailPage() {
 
       {server && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Badge variant="outline">90%+</Badge>
-          CPU above 90% for 5 minutes, memory above 90%, disk above 85%, or a missing heartbeat triggers a critical alert on the backend.
+          <Badge variant="outline">Alerts</Badge>
+          CPU above 90% for 5 minutes, memory above 90%, disk above 85%, temperature above 85°C, or a missing heartbeat triggers a critical alert on the backend.
         </p>
       )}
     </div>

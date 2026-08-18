@@ -13,6 +13,7 @@ export interface MetricPoint {
   memoryTotalBytes: number
   diskUtilizationPct: number
   networkInBytesSec: number
+  cpuTempC?: number | null
 }
 
 export interface AlertResponse {

@@ -32,6 +32,10 @@ public sealed class MetricRollup
 
     public long NetworkInMaxBytesSec { get; set; }
 
+    public float? CpuTempAvgC { get; set; }
+
+    public float? CpuTempMaxC { get; set; }
+
     public int SampleCount { get; set; }
 
     public Server? Server { get; init; }

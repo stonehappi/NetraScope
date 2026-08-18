@@ -18,8 +18,8 @@ public sealed class MetricMaintenanceServiceTests
         await using var db = CreateDbContext();
         AddServer(db, "server-01");
         // Two samples in the same 5-minute and hourly bucket (11:55 / 11:00).
-        db.PerformanceMetrics.Add(NewMetric("server-01", Now.AddMinutes(-5), cpu: 20, disk: 30));
-        db.PerformanceMetrics.Add(NewMetric("server-01", Now.AddMinutes(-5).AddSeconds(30), cpu: 40, disk: 50));
+        db.PerformanceMetrics.Add(NewMetric("server-01", Now.AddMinutes(-5), cpu: 20, disk: 30, temp: 50));
+        db.PerformanceMetrics.Add(NewMetric("server-01", Now.AddMinutes(-5).AddSeconds(30), cpu: 40, disk: 50, temp: 70));
         await db.SaveChangesAsync();
 
         await CreateService(db).RollUpAsync(CancellationToken.None);
@@ -31,6 +31,8 @@ public sealed class MetricMaintenanceServiceTests
         Assert.Equal(40, fiveMinute.CpuMaxPct);
         Assert.Equal(40, fiveMinute.DiskAvgPct);
         Assert.Equal(50, fiveMinute.DiskMaxPct);
+        Assert.Equal(60, fiveMinute.CpuTempAvgC);
+        Assert.Equal(70, fiveMinute.CpuTempMaxC);
         Assert.Equal(1024, fiveMinute.MemoryTotalMaxBytes);
         Assert.Equal(2, fiveMinute.SampleCount);
 
@@ -38,6 +40,7 @@ public sealed class MetricMaintenanceServiceTests
             rollup => rollup.Granularity == MetricResolution.HourGranularity);
         Assert.Equal(new DateTimeOffset(2026, 6, 17, 11, 0, 0, TimeSpan.Zero), hour.BucketStart);
         Assert.Equal(30, hour.CpuAvgPct);
+        Assert.Equal(60, hour.CpuTempAvgC);
         Assert.Equal(2, hour.SampleCount);
     }
 
@@ -115,8 +118,9 @@ public sealed class MetricMaintenanceServiceTests
     private static PerformanceMetric NewMetric(
         string serverId,
         DateTimeOffset timestamp,
-        float cpu,
-        float disk = 40) => new()
+        float cpu = 10,
+        float disk = 20,
+        float? temp = null) => new()
     {
         ServerId = serverId,
         Timestamp = timestamp,
@@ -125,6 +129,7 @@ public sealed class MetricMaintenanceServiceTests
         MemoryTotalBytes = 1024,
         DiskUtilizationPct = disk,
         NetworkInBytesSec = 2048,
+        CpuTempC = temp,
     };
 
     private static MetricRollup NewRollup(

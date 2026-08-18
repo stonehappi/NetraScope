@@ -67,6 +67,21 @@ public sealed class AlertingService(
             "Disk usage recovered below the alert threshold.",
             cancellationToken);
 
+        if (packet.CpuTempC.HasValue)
+        {
+            await EvaluateRuleAsync(
+                packet.ServerId,
+                ownerUserId,
+                "cpu_temp_high",
+                packet.CpuTempC.Value > options.Value.CpuTempThresholdC,
+                packet.CpuTempC.Value,
+                options.Value.CpuTempThresholdC,
+                observedAt,
+                $"CPU temperature is {packet.CpuTempC.Value:0.#}°C, above {options.Value.CpuTempThresholdC:0.#}°C.",
+                "CPU temperature recovered below the alert threshold.",
+                cancellationToken);
+        }
+
         await ResolveAsync(
             packet.ServerId,
             ownerUserId,

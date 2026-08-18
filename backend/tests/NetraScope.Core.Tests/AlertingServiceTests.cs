@@ -100,6 +100,38 @@ public sealed class AlertingServiceTests
         Assert.Equal(2, notifier.Notifications.Count);
     }
 
+    [Fact]
+    public async Task HighCpuTempCreatesAndResolvesAlert()
+    {
+        await using var db = CreateDbContext();
+        AddServer(db, "server-temp");
+        await db.SaveChangesAsync();
+        var notifier = new CapturingNotifier();
+        var service = CreateService(db, notifier);
+
+        await service.EvaluateMetricAsync(
+            ValidPacket("server-temp") with { CpuTempC = 92.5f },
+            TestOwnerUserId,
+            CancellationToken.None);
+
+        var active = await db.AlertEvents.SingleAsync();
+        Assert.Equal("cpu_temp_high", active.RuleKey);
+        Assert.Equal("active", active.Status);
+        Assert.Single(notifier.Notifications);
+
+        await service.EvaluateMetricAsync(
+            ValidPacket("server-temp") with
+            {
+                CpuTempC = 60.0f,
+                Timestamp = DateTimeOffset.UtcNow.AddMinutes(1),
+            },
+            TestOwnerUserId,
+            CancellationToken.None);
+
+        Assert.Equal("resolved", (await db.AlertEvents.SingleAsync()).Status);
+        Assert.Equal(2, notifier.Notifications.Count);
+    }
+
     private static AlertingService CreateService(
         NetraDbContext db,
         CapturingNotifier notifier,

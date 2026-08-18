@@ -32,7 +32,7 @@ const EMPTY_SERVERS: ServerSummary[] = []
 const EMPTY_ALERTS: AlertResponse[] = []
 
 type StatusFilter = "all" | ServerStatus
-type SortKey = "status" | "hostname" | "heartbeat" | "cpu" | "memory" | "disk"
+type SortKey = "status" | "hostname" | "heartbeat" | "cpu" | "memory" | "disk" | "temperature"
 
 const STATUS_ORDER: Record<ServerStatus, number> = {
   offline: 0,
@@ -51,6 +51,7 @@ const RULE_LABELS: Record<string, string> = {
   cpu_high_5m: "CPU sustained high",
   memory_high: "Memory high",
   disk_high: "Disk high",
+  cpu_temp_high: "CPU temperature high",
   server_offline: "Server offline",
 }
 
@@ -202,6 +203,7 @@ export function DashboardPage() {
                 <SelectItem value="cpu">Sort by CPU</SelectItem>
                 <SelectItem value="memory">Sort by memory</SelectItem>
                 <SelectItem value="disk">Sort by disk</SelectItem>
+                <SelectItem value="temperature">Sort by temperature</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -437,6 +439,7 @@ function metricValue(
   if (sortBy === "cpu") return metric.cpuUsagePct
   if (sortBy === "disk") return metric.diskUtilizationPct
   if (sortBy === "memory") return (metric.memoryUsedBytes / metric.memoryTotalBytes) * 100
+  if (sortBy === "temperature") return metric.cpuTempC ?? Number.NEGATIVE_INFINITY
   return STATUS_ORDER[getServerStatus(server.lastHeartbeatAt)]
 }
 

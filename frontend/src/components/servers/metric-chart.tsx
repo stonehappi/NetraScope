@@ -25,7 +25,7 @@ export function MetricChart({
 }: {
   title: string
   description?: string
-  data: Array<Record<string, string | number>>
+  data: Array<Record<string, string | number | null | undefined>>
   dataKey: string
   color: string
   yDomain?: [number, number]

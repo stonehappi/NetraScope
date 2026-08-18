@@ -124,6 +124,19 @@ public sealed class MetricMaintenanceService(
             rollup.DiskMaxPct = group.Max(metric => metric.DiskUtilizationPct);
             rollup.NetworkInAvgBytesSec = (long)group.Average(metric => metric.NetworkInBytesSec);
             rollup.NetworkInMaxBytesSec = group.Max(metric => metric.NetworkInBytesSec);
+
+            var tempSamples = group.Where(m => m.CpuTempC.HasValue).Select(m => m.CpuTempC!.Value).ToArray();
+            if (tempSamples.Length > 0)
+            {
+                rollup.CpuTempAvgC = tempSamples.Average();
+                rollup.CpuTempMaxC = tempSamples.Max();
+            }
+            else
+            {
+                rollup.CpuTempAvgC = null;
+                rollup.CpuTempMaxC = null;
+            }
+
             rollup.SampleCount = group.Count();
         }
 

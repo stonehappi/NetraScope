@@ -275,6 +275,29 @@ public sealed class MetricEndpointTests
         Assert.Equal([20f, 30f], points.Select(point => point.CpuUsagePct));
     }
 
+    [Fact]
+    public async Task PostMetricAcceptsAndPersistsCpuTempC()
+    {
+        await using var db = CreateDbContext();
+        var packet = ValidPacket() with { ServerId = "server-temp-01", CpuTempC = 58.5f };
+
+        var result = await IngestAsync(packet, db);
+        Assert.Equal((int)HttpStatusCode.Accepted, GetStatusCode(result));
+
+        var metric = await db.PerformanceMetrics.SingleAsync(item => item.ServerId == packet.ServerId);
+        Assert.Equal(58.5f, metric.CpuTempC);
+    }
+
+    [Fact]
+    public async Task PostMetricRejectsInvalidCpuTempC()
+    {
+        await using var db = CreateDbContext();
+        var packet = ValidPacket() with { ServerId = "server-temp-02", CpuTempC = 300f };
+
+        var result = await IngestAsync(packet, db);
+        Assert.Equal((int)HttpStatusCode.BadRequest, GetStatusCode(result));
+    }
+
     private static PerformanceMetric NewMetric(string serverId, DateTimeOffset timestamp, float cpu) => new()
     {
         ServerId = serverId,

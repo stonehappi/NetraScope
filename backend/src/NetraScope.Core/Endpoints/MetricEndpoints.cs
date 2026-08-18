@@ -113,7 +113,8 @@ public static class MetricEndpoints
                     metric.MemoryUsedBytes,
                     metric.MemoryTotalBytes,
                     metric.DiskUtilizationPct,
-                    metric.NetworkInBytesSec))
+                    metric.NetworkInBytesSec,
+                    metric.CpuTempC))
                 .ToArrayAsync(cancellationToken)
             : await db.MetricRollups
                 .AsNoTracking()
@@ -128,7 +129,8 @@ public static class MetricEndpoints
                     rollup.MemoryUsedAvgBytes,
                     rollup.MemoryTotalMaxBytes,
                     rollup.DiskAvgPct,
-                    rollup.NetworkInAvgBytesSec))
+                    rollup.NetworkInAvgBytesSec,
+                    rollup.CpuTempAvgC))
                 .ToArrayAsync(cancellationToken);
 
         return Results.Ok(points);
@@ -225,6 +227,7 @@ public static class MetricEndpoints
                 MemoryTotalBytes = packet.MemoryTotalBytes,
                 DiskUtilizationPct = packet.DiskUtilizationPct,
                 NetworkInBytesSec = packet.NetworkInBytesSec,
+                CpuTempC = packet.CpuTempC,
             });
         }
 
@@ -348,6 +351,12 @@ public static class MetricEndpoints
         {
             errors[nameof(packet.NetworkInBytesSec)] =
                 ["NetworkInBytesSec cannot be negative."];
+        }
+
+        if (packet.CpuTempC.HasValue && (!float.IsFinite(packet.CpuTempC.Value) || packet.CpuTempC.Value is < -50 or > 200))
+        {
+            errors[nameof(packet.CpuTempC)] =
+                ["CpuTempC must be between -50 and 200 degrees Celsius."];
         }
 
         return errors;

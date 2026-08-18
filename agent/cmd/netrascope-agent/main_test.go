@@ -48,6 +48,39 @@ func TestSendMetric(t *testing.T) {
 	}
 }
 
+func TestSendMetricWithTemperature(t *testing.T) {
+	t.Parallel()
+
+	temp := 62.5
+	metric := metricPacket{
+		ServerID:           "server-01",
+		Timestamp:          time.Date(2026, time.June, 13, 12, 0, 0, 0, time.UTC),
+		CPUUsagePct:        25.5,
+		MemoryUsedBytes:    512,
+		MemoryTotalBytes:   1024,
+		DiskUtilizationPct: 40,
+		NetworkInBytesSec:  2048,
+		CPUTempC:           &temp,
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var received metricPacket
+		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if received.CPUTempC == nil || *received.CPUTempC != temp {
+			t.Errorf("received cpuTempC = %#v, want %v", received.CPUTempC, temp)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	cfg := config{ServerURL: server.URL}
+	if err := sendMetric(context.Background(), server.Client(), cfg, metric); err != nil {
+		t.Fatalf("sendMetric returned error: %v", err)
+	}
+}
+
 func TestSendMetricRejectsNonSuccessStatus(t *testing.T) {
 	t.Parallel()
 
@@ -332,8 +365,10 @@ func TestUpdateAgentReplacesDestinationFromURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat updated destination: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o755 {
-		t.Fatalf("updated destination permissions = %v, want 0755", got)
+	if runtime.GOOS != "windows" {
+		if got := info.Mode().Perm(); got != 0o755 {
+			t.Fatalf("updated destination permissions = %v, want 0755", got)
+		}
 	}
 }
 

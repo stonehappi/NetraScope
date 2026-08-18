@@ -7,4 +7,5 @@ public sealed record MetricPacket(
     long MemoryUsedBytes,
     long MemoryTotalBytes,
     float DiskUtilizationPct,
-    long NetworkInBytesSec);
+    long NetworkInBytesSec,
+    float? CpuTempC = null);

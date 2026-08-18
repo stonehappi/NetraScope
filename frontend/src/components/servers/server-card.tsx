@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { ArrowUpRight } from "lucide-react"
+import { ArrowUpRight, Thermometer } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/servers/status-badge"
 import { UsageMeter } from "@/components/servers/usage-meter"
 import { getServerMetrics } from "@/lib/api"
-import { formatBytesPerSecond, formatRelativeTime } from "@/lib/format"
+import { formatBytesPerSecond, formatRelativeTime, formatTemperature } from "@/lib/format"
 import type { MetricPoint, ServerSummary } from "@/types/api"
 
 export function ServerCard({
@@ -64,7 +64,22 @@ export function ServerCard({
 
       <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground">
         <span>{formatRelativeTime(server.lastHeartbeatAt)}</span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          {latest?.cpuTempC != null && (
+            <span
+              className={`inline-flex items-center gap-0.5 font-medium tabular-nums ${
+                latest.cpuTempC >= 85
+                  ? "text-destructive"
+                  : latest.cpuTempC >= 70
+                    ? "text-amber-500"
+                    : "text-muted-foreground"
+              }`}
+              title="CPU Temperature"
+            >
+              <Thermometer className="size-3" />
+              {formatTemperature(latest.cpuTempC, 0)}
+            </span>
+          )}
           {latest && <span>{formatBytesPerSecond(latest.networkInBytesSec)} in</span>}
           <ArrowUpRight className="size-3.5 opacity-0 transition group-hover:opacity-100" />
         </div>

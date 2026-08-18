@@ -17,4 +17,5 @@ public sealed record MetricPoint(
     long MemoryUsedBytes,
     long MemoryTotalBytes,
     float DiskUtilizationPct,
-    long NetworkInBytesSec);
+    long NetworkInBytesSec,
+    float? CpuTempC = null);
