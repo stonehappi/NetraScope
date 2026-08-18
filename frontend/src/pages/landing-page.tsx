@@ -8,6 +8,7 @@ import {
   Network,
   ShieldCheck,
   Tags,
+  Thermometer,
 } from "lucide-react"
 
 import { BrandLogo } from "@/components/brand-logo"
@@ -22,6 +23,11 @@ const features = [
     icon: Cpu,
     title: "CPU, memory & disk",
     description: "Track utilization across every host with live, auto-refreshing cards.",
+  },
+  {
+    icon: Thermometer,
+    title: "Thermal & temperature",
+    description: "Monitor hardware thermal zones and CPU package temperatures with early alert warnings.",
   },
   {
     icon: Network,
@@ -42,11 +48,6 @@ const features = [
     icon: ShieldCheck,
     title: "Secure by default",
     description: "JWT-based authentication protects your dashboard, with token-based agent ingestion.",
-  },
-  {
-    icon: Gauge,
-    title: "Always up to date",
-    description: "The dashboard refreshes every 15 seconds so you always see current status.",
   },
 ]
 
@@ -119,7 +120,7 @@ export function LandingPage() {
             <span className="text-primary">all in one place</span>
           </h1>
           <p className="max-w-xl text-base text-muted-foreground sm:text-lg">
-            NetraScope collects CPU, memory, disk, and network metrics from lightweight
+            NetraScope collects CPU, temperature, memory, disk, and network metrics from lightweight
             agents and gives you a live fleet-wide dashboard with history, tags, and search.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
@@ -164,7 +165,7 @@ export function LandingPage() {
                 Drill into any server with one click
               </h2>
               <p className="text-muted-foreground sm:text-lg">
-                Open a server to see real-time CPU, memory, disk, and network usage, plus
+                Open a server to see real-time CPU, temperature, memory, disk, and network usage, plus
                 tags and the last heartbeat — everything you need to spot a problem fast.
               </p>
             </div>
@@ -184,7 +185,7 @@ export function LandingPage() {
             </h2>
             <p className="max-w-2xl text-muted-foreground sm:text-lg">
               Switch between 15-minute, 1-hour, 6-hour, and 24-hour windows to spot
-              trends over time, with thresholds for sustained CPU, memory, disk, and offline servers.
+              trends over time, with thresholds for sustained CPU, high temperature, memory, disk, and offline servers.
             </p>
             <div className="grid gap-4 pt-2 sm:grid-cols-2 lg:grid-cols-4">
               <img src="/cpu-usage.png" alt="CPU usage history chart" className="w-full" loading="lazy" />
