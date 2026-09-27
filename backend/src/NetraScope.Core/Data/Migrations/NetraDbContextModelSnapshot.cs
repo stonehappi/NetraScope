@@ -208,6 +208,12 @@ namespace NetraScope.Core.Data.Migrations
                     b.Property<float>("CpuMaxPct")
                         .HasColumnType("real");
 
+                    b.Property<float?>("CpuTempAvgC")
+                        .HasColumnType("real");
+
+                    b.Property<float?>("CpuTempMaxC")
+                        .HasColumnType("real");
+
                     b.Property<float>("DiskAvgPct")
                         .HasColumnType("real");
 
@@ -248,6 +254,9 @@ namespace NetraScope.Core.Data.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
                     b.Property<float>("CpuUsagePct")
+                        .HasColumnType("real");
+
+                    b.Property<float?>("CpuTempC")
                         .HasColumnType("real");
 
                     b.Property<float>("DiskUtilizationPct")
