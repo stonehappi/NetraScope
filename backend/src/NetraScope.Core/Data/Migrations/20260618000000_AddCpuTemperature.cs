@@ -1,10 +1,12 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace NetraScope.Core.Data.Migrations
 {
-    /// <inheritdoc />
+    [DbContext(typeof(NetraDbContext))]
+    [Migration("20260618000000_AddCpuTemperature")]
     public partial class AddCpuTemperature : Migration
     {
         /// <inheritdoc />
