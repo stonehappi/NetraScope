@@ -22,6 +22,8 @@ export function MetricChart({
   color,
   yDomain,
   tickFormatter,
+  emptyMessage = "No data for this time range yet.",
+  headerExtra,
 }: {
   title: string
   description?: string
@@ -30,6 +32,8 @@ export function MetricChart({
   color: string
   yDomain?: [number, number]
   tickFormatter?: (value: number) => string
+  emptyMessage?: string
+  headerExtra?: React.ReactNode
 }) {
   const config: ChartConfig = {
     [dataKey]: { label: title, color },
@@ -38,14 +42,17 @@ export function MetricChart({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
+      <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
+        <div className="space-y-1">
+          <CardTitle className="text-base">{title}</CardTitle>
+          {description && <CardDescription>{description}</CardDescription>}
+        </div>
+        {headerExtra}
       </CardHeader>
       <CardContent>
         {data.length === 0 ? (
-          <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">
-            No data for this time range yet.
+          <div className="flex h-[220px] items-center justify-center text-center text-sm text-muted-foreground p-4">
+            {emptyMessage}
           </div>
         ) : (
           <ChartContainer config={config} className="aspect-auto h-[220px] w-full">
