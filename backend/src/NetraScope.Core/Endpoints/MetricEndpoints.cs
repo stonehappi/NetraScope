@@ -237,6 +237,20 @@ public static class MetricEndpoints
             await transaction.CommitAsync(cancellationToken);
         }
 
+        foreach (var packet in packets)
+        {
+            logger.LogInformation(
+                "Received metric for {ServerId} at {Timestamp}: CPU {CpuUsagePct:F1}%, CPU temperature {CpuTempC}, memory {MemoryUsedBytes}/{MemoryTotalBytes} bytes, disk {DiskUtilizationPct:F1}%, network in {NetworkInBytesSec} bytes/sec",
+                packet.ServerId,
+                packet.Timestamp,
+                packet.CpuUsagePct,
+                packet.CpuTempC is null ? "unavailable" : $"{packet.CpuTempC:F1} C",
+                packet.MemoryUsedBytes,
+                packet.MemoryTotalBytes,
+                packet.DiskUtilizationPct,
+                packet.NetworkInBytesSec);
+        }
+
         if (tokenContext.AgentTokenId is not null)
         {
             await db.AgentTokens
