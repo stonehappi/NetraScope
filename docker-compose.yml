@@ -25,6 +25,8 @@ services:
     environment:
       ConnectionStrings__NetraScope: Host=db;Port=5432;Database=netrascope;Username=postgres;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       Auth__Jwt__Secret: ${JWT_SECRET:?JWT_SECRET must be set in .env to a long random value}
+      Auth__Jwt__Issuer: ${JWT_ISSUER:-NetraScope}
+      Auth__Jwt__Audience: ${JWT_AUDIENCE:-NetraScope}
     depends_on:
       db:
         condition: service_healthy
@@ -40,11 +42,34 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ConnectionStrings__NetraScope: Host=db;Port=5432;Database=netrascope;Username=postgres;Password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       Auth__Jwt__Secret: ${JWT_SECRET:?JWT_SECRET must be set in .env to a long random value}
+      Auth__Jwt__Issuer: ${JWT_ISSUER:-NetraScope}
+      Auth__Jwt__Audience: ${JWT_AUDIENCE:-NetraScope}
+      Auth__Jwt__ExpiryMinutes: ${JWT_EXPIRY_MINUTES:-60}
+      Auth__AllowRegistration: ${AUTH_ALLOW_REGISTRATION:-true}
+      Auth__RateLimit__PermitLimit: ${AUTH_RATE_LIMIT_PERMIT_LIMIT:-10}
+      Auth__RateLimit__WindowSeconds: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:-60}
+      Metrics__RateLimit__PermitLimit: ${METRICS_RATE_LIMIT_PERMIT_LIMIT:-600}
+      Metrics__RateLimit__WindowSeconds: ${METRICS_RATE_LIMIT_WINDOW_SECONDS:-60}
+      Alerting__Enabled: ${ALERTING_ENABLED:-true}
+      Alerting__CpuThresholdPct: ${ALERT_CPU_THRESHOLD_PCT:-90}
+      Alerting__CpuSustainedMinutes: ${ALERT_CPU_SUSTAINED_MINUTES:-5}
+      Alerting__MemoryThresholdPct: ${ALERT_MEMORY_THRESHOLD_PCT:-90}
+      Alerting__DiskThresholdPct: ${ALERT_DISK_THRESHOLD_PCT:-85}
+      Alerting__CpuTempThresholdC: ${ALERT_CPU_TEMP_THRESHOLD_C:-85}
+      Alerting__OfflineMinutes: ${ALERT_OFFLINE_MINUTES:-2}
       Alerting__WebhookUrls__0: ${ALERT_WEBHOOK_URL:-}
+      Alerting__EmailWebhookUrl: ${ALERT_EMAIL_WEBHOOK_URL:-}
       Alerting__DiscordWebhookUrl: ${ALERT_DISCORD_WEBHOOK_URL:-}
       Alerting__SlackWebhookUrl: ${ALERT_SLACK_WEBHOOK_URL:-}
       Alerting__TelegramBotToken: ${ALERT_TELEGRAM_BOT_TOKEN:-}
       Alerting__TelegramChatId: ${ALERT_TELEGRAM_CHAT_ID:-}
+      MetricRetention__Enabled: ${METRIC_RETENTION_ENABLED:-true}
+      MetricRetention__RawRetentionDays: ${METRIC_RAW_RETENTION_DAYS:-30}
+      MetricRetention__FiveMinuteRetentionDays: ${METRIC_FIVE_MINUTE_RETENTION_DAYS:-90}
+      MetricRetention__HourRetentionDays: ${METRIC_HOUR_RETENTION_DAYS:-365}
+      MetricRetention__IntervalMinutes: ${METRIC_MAINTENANCE_INTERVAL_MINUTES:-5}
+      MetricRetention__FiveMinuteLookbackMinutes: ${METRIC_FIVE_MINUTE_LOOKBACK_MINUTES:-90}
+      MetricRetention__HourLookbackMinutes: ${METRIC_HOUR_LOOKBACK_MINUTES:-180}
     depends_on:
       db:
         condition: service_healthy
