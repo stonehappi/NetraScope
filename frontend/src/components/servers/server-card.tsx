@@ -1,12 +1,17 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { ArrowUpRight, Thermometer } from "lucide-react"
+import { ArrowDownLeft, ArrowUpRight, Thermometer } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/servers/status-badge"
 import { UsageMeter } from "@/components/servers/usage-meter"
 import { getServerMetrics } from "@/lib/api"
-import { formatBytesPerSecond, formatRelativeTime, formatTemperature } from "@/lib/format"
+import {
+  formatBytes,
+  formatBytesPerSecond,
+  formatRelativeTime,
+  formatTemperature,
+} from "@/lib/format"
 import type { MetricPoint, ServerSummary } from "@/types/api"
 
 export function ServerCard({
@@ -54,34 +59,61 @@ export function ServerCard({
           <UsageMeter label="CPU" value={latest.cpuUsagePct} />
           <UsageMeter
             label="Memory"
-            value={(latest.memoryUsedBytes / latest.memoryTotalBytes) * 100}
+            value={(latest.memoryUsedBytes / (latest.memoryTotalBytes || 1)) * 100}
+            detail={`${formatBytes(latest.memoryUsedBytes)} of ${formatBytes(latest.memoryTotalBytes)}`}
           />
           <UsageMeter label="Disk" value={latest.diskUtilizationPct} />
+
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/40 text-xs">
+            <div className="flex items-center gap-1.5 rounded-lg bg-muted/40 px-2.5 py-1.5">
+              <ArrowDownLeft className="size-3.5 text-blue-500 shrink-0" />
+              <div className="min-w-0">
+                <span className="text-[10px] text-muted-foreground block leading-none">Net In</span>
+                <span className="font-medium tabular-nums truncate block">
+                  {formatBytesPerSecond(latest.networkInBytesSec)}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-lg bg-muted/40 px-2.5 py-1.5">
+              <Thermometer
+                className={`size-3.5 shrink-0 ${
+                  latest.cpuTempC != null
+                    ? latest.cpuTempC >= 85
+                      ? "text-destructive"
+                      : latest.cpuTempC >= 70
+                        ? "text-amber-500"
+                        : "text-emerald-500"
+                    : "text-muted-foreground"
+                }`}
+              />
+              <div className="min-w-0">
+                <span className="text-[10px] text-muted-foreground block leading-none">CPU Temp</span>
+                <span
+                  className={`font-medium tabular-nums truncate block ${
+                    latest.cpuTempC != null
+                      ? latest.cpuTempC >= 85
+                        ? "text-destructive"
+                        : latest.cpuTempC >= 70
+                          ? "text-amber-500"
+                          : ""
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {latest.cpuTempC != null ? formatTemperature(latest.cpuTempC, 0) : "N/A"}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No recent metrics.</p>
       )}
 
-      <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground">
+      <div className="mt-auto flex items-center justify-between text-xs text-muted-foreground pt-1">
         <span>{formatRelativeTime(server.lastHeartbeatAt)}</span>
-        <div className="flex items-center gap-2">
-          {latest?.cpuTempC != null && (
-            <span
-              className={`inline-flex items-center gap-0.5 font-medium tabular-nums ${
-                latest.cpuTempC >= 85
-                  ? "text-destructive"
-                  : latest.cpuTempC >= 70
-                    ? "text-amber-500"
-                    : "text-muted-foreground"
-              }`}
-              title="CPU Temperature"
-            >
-              <Thermometer className="size-3" />
-              {formatTemperature(latest.cpuTempC, 0)}
-            </span>
-          )}
-          {latest && <span>{formatBytesPerSecond(latest.networkInBytesSec)} in</span>}
-          <ArrowUpRight className="size-3.5 opacity-0 transition group-hover:opacity-100" />
+        <div className="flex items-center gap-1 font-medium group-hover:text-primary transition-colors">
+          <span>Details</span>
+          <ArrowUpRight className="size-3.5" />
         </div>
       </div>
     </Link>

@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react"
 import { useQueries, useQuery } from "@tanstack/react-query"
-import { Activity, AlertTriangle, Layers3, Search, ServerOff } from "lucide-react"
+import { Activity, AlertTriangle, ArrowDownLeft, ArrowUpRight, Layers3, Search, ServerOff, Thermometer } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { AddServerDialog } from "@/components/servers/add-server-dialog"
 import { OnboardingCard } from "@/components/servers/onboarding-card"
 import { ServerCard } from "@/components/servers/server-card"
+import { StatusBadge } from "@/components/servers/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -18,10 +19,22 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getAlerts, getServerMetrics, getServers } from "@/lib/api"
 import {
+  formatBytes,
+  formatBytesPerSecond,
+  formatPercent,
   formatRelativeTime,
+  formatTemperature,
   getServerStatus,
   type ServerStatus,
 } from "@/lib/format"
@@ -32,7 +45,15 @@ const EMPTY_SERVERS: ServerSummary[] = []
 const EMPTY_ALERTS: AlertResponse[] = []
 
 type StatusFilter = "all" | ServerStatus
-type SortKey = "status" | "hostname" | "heartbeat" | "cpu" | "memory" | "disk" | "temperature"
+type SortKey =
+  | "status"
+  | "hostname"
+  | "heartbeat"
+  | "cpu"
+  | "memory"
+  | "disk"
+  | "network"
+  | "temperature"
 
 const STATUS_ORDER: Record<ServerStatus, number> = {
   offline: 0,
@@ -94,6 +115,44 @@ export function DashboardPage() {
     return metrics
   }, [metricQueries, servers])
 
+  const fleetMetrics = useMemo(() => {
+    const points: MetricPoint[] = []
+    for (const server of servers) {
+      const metric = latestMetrics.get(server.id)
+      if (metric) points.push(metric)
+    }
+
+    if (points.length === 0) return null
+
+    const totalCpu = points.reduce((acc, p) => acc + p.cpuUsagePct, 0)
+    const totalMemUsed = points.reduce((acc, p) => acc + p.memoryUsedBytes, 0)
+    const totalMemCapacity = points.reduce((acc, p) => acc + p.memoryTotalBytes, 0)
+    const totalDisk = points.reduce((acc, p) => acc + p.diskUtilizationPct, 0)
+    const totalNetIn = points.reduce((acc, p) => acc + p.networkInBytesSec, 0)
+
+    const tempPoints = points.filter((p) => p.cpuTempC != null)
+    const avgTemp =
+      tempPoints.length > 0
+        ? tempPoints.reduce((acc, p) => acc + (p.cpuTempC ?? 0), 0) / tempPoints.length
+        : null
+    const maxTemp =
+      tempPoints.length > 0
+        ? Math.max(...tempPoints.map((p) => p.cpuTempC!))
+        : null
+
+    return {
+      reportingCount: points.length,
+      avgCpu: totalCpu / points.length,
+      avgMemory: totalMemCapacity > 0 ? (totalMemUsed / totalMemCapacity) * 100 : 0,
+      totalMemUsed,
+      totalMemCapacity,
+      avgDisk: totalDisk / points.length,
+      totalNetIn,
+      avgTemp,
+      maxTemp,
+    }
+  }, [latestMetrics, servers])
+
   const availableTags = useMemo(() => {
     const tags = new Set<string>()
     for (const server of servers) {
@@ -148,11 +207,47 @@ export function DashboardPage() {
       </div>
 
       {!isLoading && !isError && servers.length > 0 && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <SummaryTile label="Servers" value={servers.length.toString()} detail="reporting agents" />
-          <SummaryTile label="Online" value={statusCounts.online.toString()} detail={`${statusCounts.stale} stale`} />
-          <SummaryTile label="Offline" value={statusCounts.offline.toString()} detail="needs attention" />
-          <SummaryTile label="Active alerts" value={activeAlerts.length.toString()} detail="open incidents" tone={activeAlerts.length > 0 ? "critical" : "normal"} />
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <SummaryTile label="Servers" value={servers.length.toString()} detail="reporting agents" />
+            <SummaryTile label="Online" value={statusCounts.online.toString()} detail={`${statusCounts.stale} stale`} />
+            <SummaryTile label="Offline" value={statusCounts.offline.toString()} detail="needs attention" />
+            <SummaryTile label="Active alerts" value={activeAlerts.length.toString()} detail="open incidents" tone={activeAlerts.length > 0 ? "critical" : "normal"} />
+          </div>
+
+          {fleetMetrics && (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <SummaryTile
+                label="Fleet Avg CPU"
+                value={formatPercent(fleetMetrics.avgCpu, 1)}
+                detail={`${fleetMetrics.reportingCount} of ${servers.length} reporting`}
+                tone={fleetMetrics.avgCpu >= 90 ? "critical" : "normal"}
+              />
+              <SummaryTile
+                label="Fleet Avg Memory"
+                value={formatPercent(fleetMetrics.avgMemory, 1)}
+                detail={`${formatBytes(fleetMetrics.totalMemUsed)} of ${formatBytes(fleetMetrics.totalMemCapacity)}`}
+                tone={fleetMetrics.avgMemory >= 90 ? "critical" : "normal"}
+              />
+              <SummaryTile
+                label="Fleet Avg Disk"
+                value={formatPercent(fleetMetrics.avgDisk, 1)}
+                detail="root storage"
+                tone={fleetMetrics.avgDisk >= 85 ? "critical" : "normal"}
+              />
+              <SummaryTile
+                label="Fleet Network In"
+                value={formatBytesPerSecond(fleetMetrics.totalNetIn)}
+                detail="inbound throughput"
+              />
+              <SummaryTile
+                label="Fleet Temperature"
+                value={fleetMetrics.avgTemp != null ? formatTemperature(fleetMetrics.avgTemp, 1) : "N/A"}
+                detail={fleetMetrics.maxTemp != null ? `Peak: ${formatTemperature(fleetMetrics.maxTemp, 0)}` : "no thermal sensor"}
+                tone={fleetMetrics.maxTemp != null && fleetMetrics.maxTemp >= 85 ? "critical" : "normal"}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -203,6 +298,7 @@ export function DashboardPage() {
                 <SelectItem value="cpu">Sort by CPU</SelectItem>
                 <SelectItem value="memory">Sort by memory</SelectItem>
                 <SelectItem value="disk">Sort by disk</SelectItem>
+                <SelectItem value="network">Sort by network</SelectItem>
                 <SelectItem value="temperature">Sort by temperature</SelectItem>
               </SelectContent>
             </Select>
@@ -243,6 +339,7 @@ export function DashboardPage() {
               <TabsList>
                 <TabsTrigger value="servers">Servers</TabsTrigger>
                 <TabsTrigger value="environments">Environments</TabsTrigger>
+                <TabsTrigger value="matrix">Metrics Matrix</TabsTrigger>
               </TabsList>
               <TabsContent value="servers">
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -276,6 +373,12 @@ export function DashboardPage() {
                     </div>
                   </section>
                 ))}
+              </TabsContent>
+              <TabsContent value="matrix">
+                <MetricsMatrix
+                  servers={filteredServers}
+                  latestMetrics={latestMetrics}
+                />
               </TabsContent>
             </Tabs>
           )}
@@ -438,9 +541,165 @@ function metricValue(
   if (!metric) return Number.NEGATIVE_INFINITY
   if (sortBy === "cpu") return metric.cpuUsagePct
   if (sortBy === "disk") return metric.diskUtilizationPct
-  if (sortBy === "memory") return (metric.memoryUsedBytes / metric.memoryTotalBytes) * 100
+  if (sortBy === "memory") return (metric.memoryUsedBytes / (metric.memoryTotalBytes || 1)) * 100
+  if (sortBy === "network") return metric.networkInBytesSec
   if (sortBy === "temperature") return metric.cpuTempC ?? Number.NEGATIVE_INFINITY
   return STATUS_ORDER[getServerStatus(server.lastHeartbeatAt)]
+}
+
+function MetricsMatrix({
+  servers,
+  latestMetrics,
+}: {
+  servers: ServerSummary[]
+  latestMetrics: Map<string, MetricPoint | null>
+}) {
+  return (
+    <Card className="overflow-hidden border border-border/60">
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Server</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">CPU</TableHead>
+              <TableHead className="text-right">Memory</TableHead>
+              <TableHead className="text-right">Disk</TableHead>
+              <TableHead className="text-right">Network In</TableHead>
+              <TableHead className="text-right">CPU Temp</TableHead>
+              <TableHead>Last Heartbeat</TableHead>
+              <TableHead className="text-right">Action</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {servers.map((server) => {
+              const metric = latestMetrics.get(server.id)
+              const memPct =
+                metric && metric.memoryTotalBytes > 0
+                  ? (metric.memoryUsedBytes / metric.memoryTotalBytes) * 100
+                  : null
+
+              return (
+                <TableRow key={server.id} className="hover:bg-muted/40 transition-colors">
+                  <TableCell>
+                    <div className="flex flex-col min-w-[140px]">
+                      <Link
+                        to={`/servers/${encodeURIComponent(server.id)}`}
+                        className="font-medium hover:underline text-foreground"
+                      >
+                        {server.hostName}
+                      </Link>
+                      <span className="text-xs text-muted-foreground truncate">
+                        {server.ipAddress ?? server.id}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge lastHeartbeatAt={server.lastHeartbeatAt} />
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {metric ? (
+                      <span
+                        className={
+                          metric.cpuUsagePct >= 90
+                            ? "font-semibold text-destructive"
+                            : metric.cpuUsagePct >= 70
+                              ? "font-semibold text-amber-500"
+                              : "text-foreground"
+                        }
+                      >
+                        {formatPercent(metric.cpuUsagePct)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {metric && memPct != null ? (
+                      <div className="flex flex-col items-end">
+                        <span
+                          className={
+                            memPct >= 90
+                              ? "font-semibold text-destructive"
+                              : memPct >= 70
+                                ? "font-semibold text-amber-500"
+                                : "text-foreground"
+                          }
+                        >
+                          {formatPercent(memPct)}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {formatBytes(metric.memoryUsedBytes)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {metric ? (
+                      <span
+                        className={
+                          metric.diskUtilizationPct >= 85
+                            ? "font-semibold text-destructive"
+                            : metric.diskUtilizationPct >= 70
+                              ? "font-semibold text-amber-500"
+                              : "text-foreground"
+                        }
+                      >
+                        {formatPercent(metric.diskUtilizationPct)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {metric ? (
+                      <span className="inline-flex items-center gap-1">
+                        <ArrowDownLeft className="size-3 text-blue-500 shrink-0" />
+                        {formatBytesPerSecond(metric.networkInBytesSec)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {metric?.cpuTempC != null ? (
+                      <span
+                        className={`inline-flex items-center gap-1 font-medium ${
+                          metric.cpuTempC >= 85
+                            ? "text-destructive"
+                            : metric.cpuTempC >= 70
+                              ? "text-amber-500"
+                              : "text-foreground"
+                        }`}
+                      >
+                        <Thermometer className="size-3 shrink-0" />
+                        {formatTemperature(metric.cpuTempC, 1)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                    {formatRelativeTime(server.lastHeartbeatAt)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link to={`/servers/${encodeURIComponent(server.id)}`}>
+                        View
+                        <ArrowUpRight className="size-3.5 ml-1" />
+                      </Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  )
 }
 
 function groupByEnvironment(servers: ServerSummary[]) {
